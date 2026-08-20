@@ -1,0 +1,168 @@
+<!-- 아카라이브 등의 HTML 소스 편집기에 아래 div 전체를 붙여넣으세요. -->
+<div style="max-width:920px;margin:0 auto;padding:28px;background:#0b0f14;color:#e8edf5;font-family:Arial,'Noto Sans KR',sans-serif;line-height:1.75;word-break:keep-all;border:1px solid #293241;border-radius:18px;">
+  <div style="padding:34px 30px;margin-bottom:22px;text-align:center;background:linear-gradient(135deg,#101827,#0c111a);border:1px solid #315f9f;border-radius:16px;">
+    <div style="margin-bottom:8px;color:#73aaff;font-size:13px;font-weight:700;letter-spacing:.08em;">RISUAI API 3.0 PLUGIN · v1.0.3</div>
+    <h1 style="margin:0 0 12px;color:#ffffff;font-size:36px;line-height:1.25;">★작가 소환★</h1>
+    <p style="margin:0;color:#b9c7da;font-size:18px;">본편 밖에서 AI 작가와 집필 회의를 하고, 필요한 내용만 메모로 전달하는 플러그인</p>
+  </div>
+
+  <div style="padding:22px 24px;margin-bottom:22px;background:#101722;border-left:4px solid #3988ff;border-radius:12px;">
+    <div style="margin-bottom:7px;color:#79adff;font-size:13px;font-weight:700;">핵심 콘셉트</div>
+    <div style="color:#ffffff;font-size:21px;font-weight:700;">“공동 집필자”이자 “편집자”인 작가를 불러 집필 회의를 하고, 필요한 내용만 “메모”로 남긴다.</div>
+  </div>
+
+  <p style="margin:0 0 12px;">RP를 진행하다 보면 캐릭터와 대화하는 것과 별개로 이런 이야기를 하고 싶을 때가 있음.</p>
+  <ul style="margin:0 0 22px;padding-left:24px;color:#cbd5e1;">
+    <li>다음 장면을 어떻게 전개할지</li>
+    <li>인물의 행동에 개연성이 있는지</li>
+    <li>지금까지 깔아둔 복선을 어떻게 회수할지</li>
+    <li>특정 캐릭터의 감정선이 자연스러운지</li>
+    <li>작가가 현재 설정을 어떻게 이해하고 있는지</li>
+    <li>다음 사용자 인풋에서 무엇을 유도할지</li>
+  </ul>
+  <p style="margin:0 0 30px;">이런 이야기를 본편에서 직접 꺼내면 몰입이 깨지고 집필 상담 내용이 본편 컨텍스트에 섞임. 그래서 본편과 분리된 집필 회의실을 만들었음.</p>
+
+  <h2 style="margin:34px 0 14px;padding-bottom:9px;color:#ffffff;font-size:25px;border-bottom:2px solid #3182f6;">실행</h2>
+  <div style="margin:0 0 18px;padding:32px;text-align:center;color:#8fb9f3;background:#0e1622;border:2px dashed #315f9f;border-radius:12px;">[사진 삽입 · 채팅창 우측 메뉴의 ★작가 소환★ 버튼]</div>
+  <p style="margin:0 0 12px;">플러그인을 임포트하면 채팅창 우측 메뉴에 <strong style="color:#ffffff;">★작가 소환★</strong> 버튼이 생김.</p>
+  <p style="margin:0 0 12px;">버튼을 누르면 RisuAI 위에 별도의 플로팅 패널이 열림. 패널을 열어둔 상태에서도 본편 채팅과 RisuAI의 다른 기능을 그대로 사용할 수 있음.</p>
+  <ul style="margin:0 0 24px;padding-left:24px;color:#cbd5e1;">
+    <li>위치 이동</li>
+    <li>상하좌우 및 모서리 크기 조절</li>
+    <li>최소화와 복원</li>
+    <li>새로고침과 닫기</li>
+    <li>최소화 상태에서도 활성 메모 개수 확인</li>
+  </ul>
+
+  <h2 style="margin:34px 0 14px;padding-bottom:9px;color:#ffffff;font-size:25px;border-bottom:2px solid #3182f6;">집필 회의</h2>
+  <div style="margin:0 0 18px;padding:32px;text-align:center;color:#8fb9f3;background:#0e1622;border:2px dashed #315f9f;border-radius:12px;">[사진 삽입 · 집필 회의 탭]</div>
+  <p style="margin:0 0 12px;">집필 회의에서는 현재 RP를 알고 있는 “작가”와 자유롭게 대화할 수 있음.</p>
+  <p style="margin:0 0 12px;">작가는 사용자를 이야기 속 등장인물이 아니라 <strong style="color:#7db2ff;">공동 집필자이자 편집자</strong>로 인식함. 다음 장면, 인물의 동기, 복선, 전개 속도, 설정 충돌 등을 본편 밖에서 함께 검토할 수 있음.</p>
+  <div style="padding:14px 16px;margin:18px 0;background:#10271b;color:#a8e8bd;border:1px solid #2f6945;border-radius:10px;"><strong>중요:</strong> 집필 회의에서 나눈 대화는 그 자체로는 본편에 아무런 영향을 주지 않음.</div>
+  <p style="margin:0 0 12px;">작가는 사용자가 메모의 생성·수정·삭제를 명시적으로 요청했을 때만 메모 작업을 제안하도록 설계되어 있음. 제안이 나와도 자동으로 반영되지 않고 사용자가 직접 선택함.</p>
+  <ul style="margin:0 0 18px;padding-left:24px;color:#cbd5e1;">
+    <li><strong style="color:#ffffff;">메모에 적용</strong>: 실제 메모에 반영</li>
+    <li><strong style="color:#ffffff;">무시</strong>: 제안을 거절</li>
+    <li><strong style="color:#ffffff;">아무것도 누르지 않음</strong>: 대기 상태로 유지</li>
+  </ul>
+  <p style="margin:0 0 12px;">대기하거나 무시한 메모 제안도 집필 회의의 대화 기록에는 상태와 함께 남음. 작가는 이전에 무엇을 제안했고 사용자가 그것을 보류하거나 거절했는지 기억하지만, 활성 메모로 취급하지는 않음.</p>
+  <p style="margin:0 0 12px;">회의실을 여러 개 만들어 전환할 수 있으며, 새 회의실의 기본 이름은 <code style="padding:2px 6px;color:#b9d4ff;background:#111d2d;border-radius:5px;">(현재 봇 이름) 회의실 (번호)</code> 형식임.</p>
+  <p style="margin:0 0 24px;">각 메시지는 개별적으로 수정하거나 삭제할 수 있음. 사용자 메시지는 내용만 고치거나, 해당 시점부터 이후 회의를 지우고 다시 보낼 수도 있음.</p>
+
+  <h2 style="margin:34px 0 14px;padding-bottom:9px;color:#ffffff;font-size:25px;border-bottom:2px solid #3182f6;">메모</h2>
+  <div style="margin:0 0 18px;padding:32px;text-align:center;color:#8fb9f3;background:#0e1622;border:2px dashed #315f9f;border-radius:12px;">[사진 삽입 · 메모 탭]</div>
+  <p style="margin:0 0 12px;">집필 회의에서 새 메모 생성안을 적용하면 <code style="padding:2px 6px;color:#b9d4ff;background:#111d2d;border-radius:5px;">(현재 봇 이름) 메모</code> 폴더 안에 자동으로 들어감. 해당 폴더가 없으면 새로 만들어짐.</p>
+  <p style="margin:0 0 12px;">폴더와 메모는 자유롭게 생성·수정·삭제하고 각각 ON/OFF 할 수 있음. 제목을 눌러 접거나 펼칠 수도 있고, 펼친 메모는 넓은 편집창에서 바로 수정할 수 있음.</p>
+  <p style="margin:0 0 20px;">폴더 이름에는 봇 이름이 들어가지만 회의실과 메모 자체는 특정 봇에 종속되지 않는 전역 자료임. 다른 봇으로 이동해도 그대로 사용할 수 있고, 봇을 삭제해도 함께 사라지지 않음.</p>
+
+  <h3 style="margin:26px 0 12px;color:#dce9fb;font-size:20px;">메모가 본편에 적용되는 방식</h3>
+  <div style="margin:0 0 18px;padding:32px;text-align:center;color:#8fb9f3;background:#0e1622;border:2px dashed #315f9f;border-radius:12px;">[사진 삽입 · 사용자 인풋 아래의 작가 메모 표시]</div>
+  <p style="margin:0 0 12px;">폴더와 개별 메모가 모두 ON인 메모만 활성 메모가 됨. 본편에서 채팅을 보내면 활성 메모가 모델 요청의 마지막 사용자 인풋 뒤에 다음과 같은 형식으로 붙어서 전달됨.</p>
+  <pre style="margin:16px 0;padding:17px;overflow:auto;white-space:pre-wrap;color:#dce8f8;background:#080c12;border:1px solid #2d3a4d;border-radius:10px;"><code>사용자 인풋:
+A는 깜짝 놀라 뒤돌아본다.
+
+(Memo(1): A의 뒤에 나타난 것은 B였다.)</code></pre>
+  <p style="margin:0 0 12px;">이 내용은 <strong style="color:#ffffff;">모델에게 보내는 요청에서만</strong> 추가됨. RisuAI에 저장된 실제 사용자 메시지 자체를 수정하지는 않음. 사용자가 확인할 수 있도록 본편 화면에는 이번 요청에 어떤 메모가 포함됐는지 별도로 표시됨.</p>
+  <p style="margin:0 0 12px;">화면과 요청에 표시되는 Memo 번호는 현재 활성화된 메모만 기준으로 다시 매겨지므로 번호가 끝없이 쌓이지 않음.</p>
+  <p style="margin:0 0 24px;">활성 메모에 로어북 활성화 키가 들어 있으면 해당 키도 본편 로어북 검색에 사용됨. 위 예시에서는 사용자 인풋에 B가 없어도 메모에 B가 있으므로, 지원 범위 안에서 B를 활성화 키로 가진 로어북이 같은 요청에 포함될 수 있음.</p>
+
+  <h2 style="margin:34px 0 14px;padding-bottom:9px;color:#ffffff;font-size:25px;border-bottom:2px solid #3182f6;">컨텍스트</h2>
+  <div style="margin:0 0 18px;padding:32px;text-align:center;color:#8fb9f3;background:#0e1622;border:2px dashed #315f9f;border-radius:12px;">[사진 삽입 · 컨텍스트 탭 전체]</div>
+  <p style="margin:0 0 12px;">컨텍스트 탭에서는 작가에게 전달할 참고 자료를 직접 관리할 수 있음.</p>
+  <ul style="margin:0 0 18px;padding-left:24px;color:#cbd5e1;">
+    <li>캐릭터 디스크립션: 캐릭터 이름과 디스크립션</li>
+    <li>페르소나: 페르소나 이름과 디스크립션</li>
+    <li>퍼스트 메시지: 기본 퍼메와 추가 퍼메 중 하나를 선택</li>
+    <li>이전 본편 대화</li>
+    <li>작가의 노트</li>
+    <li>글로벌 노트 덮어쓰기</li>
+    <li>캐릭터·챗·모듈 로어북</li>
+    <li>하이파/수파 메모리 장기 기억</li>
+    <li>기타</li>
+  </ul>
+  <p style="margin:0 0 12px;">각 항목은 개별적으로 ON/OFF 할 수 있고, 작가에게 실제로 전달될 것으로 예상되는 토큰 수도 확인할 수 있음.</p>
+  <p style="margin:0 0 24px;">맨 아래의 <strong style="color:#b8bec8;">기타</strong>는 기본적으로 OFF임. 성격, 시나리오, 예시 대화, 캐릭터 시스템 프롬프트, 포스트 히스토리 지시문, 각종 추가 노트, 제작자 정보, 캐릭터 버전, 태그처럼 일반적인 채팅에서 거의 사용하지 않거나 메타데이터에 가까운 항목이 모여 있음.</p>
+
+  <h3 style="margin:26px 0 12px;color:#dce9fb;font-size:20px;">작가용 로어북</h3>
+  <div style="margin:0 0 18px;padding:32px;text-align:center;color:#8fb9f3;background:#0e1622;border:2px dashed #315f9f;border-radius:12px;">[사진 삽입 · 로어북 ON / AUTO / OFF와 현재 활성 상태]</div>
+  <p style="margin:0 0 12px;">각 로어북은 작가에게 전달할 상태를 따로 선택할 수 있음.</p>
+  <div style="display:flex;flex-wrap:wrap;gap:9px;margin:16px 0 18px;">
+    <span style="padding:7px 12px;color:#b9f2ce;background:#143120;border:1px solid #316b48;border-radius:999px;"><strong>ON</strong> · 항상 전달</span>
+    <span style="padding:7px 12px;color:#b9d7ff;background:#12243b;border:1px solid #315f9f;border-radius:999px;"><strong>AUTO</strong> · 본편 상태를 바탕으로 판정</span>
+    <span style="padding:7px 12px;color:#d0d5dd;background:#232933;border:1px solid #485264;border-radius:999px;"><strong>OFF</strong> · 전달하지 않음</span>
+  </div>
+  <p style="margin:0 0 12px;">이 설정은 작가에게 제공되는 컨텍스트에만 적용됨. 본편 로어북의 실제 상태나 RisuAI 설정은 변경하지 않음.</p>
+  <p style="margin:0 0 24px;">AUTO는 본편의 검색 깊이, 활성화 키, 보조 키, 재귀 검색 설정 등을 가능한 범위에서 재현해 판정함. 지금 활성화됐는지와 그 이유도 화면에서 확인할 수 있으며, 로어북 폴더 전체 또는 내부 항목별로 상태를 바꿀 수 있음.</p>
+
+  <h3 style="margin:26px 0 12px;color:#dce9fb;font-size:20px;">CBS 문법 처리</h3>
+  <div style="margin:0 0 18px;padding:32px;text-align:center;color:#8fb9f3;background:#0e1622;border:2px dashed #315f9f;border-radius:12px;">[사진 삽입 · 녹색 / 적색 / 갈색으로 표시된 CBS 처리 결과]</div>
+  <p style="margin:0 0 12px;">캐릭터 디스크립션이나 로어북에서 사용하는 CBS 문법도 가능한 범위에서 RisuAI의 동작을 재현하도록 만들었음.</p>
+  <ul style="margin:0 0 18px;padding-left:24px;">
+    <li><strong style="color:#67cf83;">녹색</strong>: 현재 조건에서 적용되는 문법과 내용</li>
+    <li><strong style="color:#ef7474;">적색</strong>: 현재 조건에서 제외되는 내용</li>
+    <li><strong style="color:#e3ae62;">갈색</strong>: 플러그인이 해석하지 못한 문법</li>
+  </ul>
+  <p style="margin:0 0 12px;">미지원 문법은 항목별로 원문 그대로 작가에게 전달할지, 컨텍스트에서 제외할지 선택할 수 있음.</p>
+  <p style="margin:0 0 24px;">확률 판정 등 일부 RisuAI 기능은 지원하지 않음. 이런 경우에는 미지원 기능 안내를 표시하고, 잘못 판정한 내용을 작가에게 전달하지 않도록 처리함.</p>
+
+  <h2 style="margin:34px 0 14px;padding-bottom:9px;color:#ffffff;font-size:25px;border-bottom:2px solid #3182f6;">토큰 확인</h2>
+  <div style="margin:0 0 18px;padding:32px;text-align:center;color:#8fb9f3;background:#0e1622;border:2px dashed #315f9f;border-radius:12px;">[사진 삽입 · 토큰 확인 패널]</div>
+  <p style="margin:0 0 12px;">집필 회의의 <strong style="color:#ffffff;">토큰 확인</strong> 버튼에서는 다음 정보를 확인할 수 있음.</p>
+  <ul style="margin:0 0 18px;padding-left:24px;color:#cbd5e1;">
+    <li>다음 작가 요청의 입력 토큰 추정치</li>
+    <li>최근 작가 답변의 토큰 추정치</li>
+    <li>최대 출력 토큰</li>
+    <li>현재 RisuAI의 최대 컨텍스트 크기</li>
+  </ul>
+  <div style="padding:14px 16px;margin:18px 0 24px;background:#351b1f;color:#ffb2b9;border:1px solid #7b3941;border-radius:10px;"><strong>최대 컨텍스트를 초과할 것으로 예상됩니다.</strong><br>요청이 실패하거나 일부 대화 및 컨텍스트가 처리되지 않을 수 있습니다. 과거 대화 또는 불필요한 컨텍스트를 정리해 주세요.</div>
+  <p style="margin:0 0 24px;color:#aeb8c7;font-size:14px;">토큰 수는 정확한 모델 토크나이저 결과가 아니라 플러그인의 추정치이므로 참고용임.</p>
+
+  <h2 style="margin:34px 0 14px;padding-bottom:9px;color:#ffffff;font-size:25px;border-bottom:2px solid #3182f6;">설정</h2>
+  <div style="margin:0 0 18px;padding:32px;text-align:center;color:#8fb9f3;background:#0e1622;border:2px dashed #315f9f;border-radius:12px;">[사진 삽입 · 설정 탭]</div>
+  <p style="margin:0 0 12px;">작가 모델은 <strong style="color:#ffffff;">Main model</strong>과 <strong style="color:#ffffff;">Sub model</strong> 중에서 선택할 수 있음. 집필 회의는 본편과 별도의 모델 요청이므로 선택한 모델 공급자의 사용량이나 비용이 발생할 수 있음.</p>
+  <h3 style="margin:24px 0 10px;color:#dce9fb;font-size:19px;">집필 회의 마크다운 정리</h3>
+  <p style="margin:0 0 12px;">작가 답변에서 과도하게 사용되는 볼드·이탤릭·헤더 형식과 후행 공백을 기계적으로 정리하는 옵션임. 화면에서만 숨기는 것이 아니라 실제 집필 회의 기록을 정리하므로 이후 대화의 토큰 절약에도 영향을 줌.</p>
+  <h3 style="margin:24px 0 10px;color:#dce9fb;font-size:19px;">시스템 프롬프트</h3>
+  <p style="margin:0 0 12px;">작가의 핵심 동작을 정하는 <strong style="color:#ffffff;">기본 시스템 프롬프트</strong>와 장르·말투·분석 성향을 정하는 <strong style="color:#ffffff;">추가 시스템 프롬프트</strong>로 나뉨.</p>
+  <p style="margin:0 0 24px;">각 계층의 내장 프리셋은 수정하거나 삭제할 수 없지만, 복제해서 자유롭게 고칠 수 있음. 사용자 프리셋은 원하는 만큼 추가·수정·삭제하고 전환할 수 있음.</p>
+
+  <h2 style="margin:34px 0 14px;padding-bottom:9px;color:#ffffff;font-size:25px;border-bottom:2px solid #3182f6;">권한 안내</h2>
+  <div style="margin:0 0 18px;padding:32px;text-align:center;color:#8fb9f3;background:#0e1622;border:2px dashed #315f9f;border-radius:12px;">[사진 삽입 · RisuAI 권한 확인 창]</div>
+  <p style="margin:0 0 12px;">처음 임포트하면 컨텍스트 확인, 본편 화면의 메모 표시, 활성 메모 주입에 필요한 RisuAI 권한 확인 창이 나타남.</p>
+  <p style="margin:0 0 12px;">권한을 허용하지 않아도 가능한 범위에서는 작동하지만 관련 기능이 제한될 수 있음. 임포트 직후 권한 확인이 나타나지 않으면 RisuAI를 한 번 새로고침해 주면 됨.</p>
+  <p style="margin:0 0 28px;">플러그인은 API 키를 직접 입력받거나 저장하지 않음.</p>
+
+  <div style="padding:24px;margin:32px 0;background:linear-gradient(135deg,#112844,#101a2a);border:1px solid #397bd2;border-radius:14px;">
+    <h2 style="margin:0 0 12px;color:#ffffff;font-size:23px;">설치</h2>
+    <ol style="margin:0 0 16px;padding-left:24px;color:#d8e3f2;">
+      <li>첨부된 <code style="padding:2px 6px;color:#b9d4ff;background:#0b1420;border-radius:5px;">summon_author_v1.0.3.js</code> 다운로드</li>
+      <li>RisuAI의 <strong>설정 → 플러그인</strong>으로 이동</li>
+      <li>플러그인 임포트에서 받은 JS 파일 선택</li>
+      <li>필요한 권한 허용</li>
+      <li>채팅창 우측 메뉴에서 <strong>★작가 소환★</strong> 실행</li>
+    </ol>
+    <div style="color:#8fb9f3;font-size:14px;">RisuAI API 3.0용 단일 JavaScript 플러그인</div>
+  </div>
+
+  <h2 style="margin:38px 0 16px;padding-bottom:9px;color:#ffffff;font-size:25px;border-bottom:2px solid #596273;">Special Thanks</h2>
+  <div style="padding:20px 22px;margin-bottom:16px;background:#11161d;border:1px solid #343d4a;border-radius:12px;">
+    <h3 style="margin:0 0 8px;color:#ffffff;font-size:19px;">🎬 AD야 잠깐 와봐 — 실시간 작전회의 플러그인</h3>
+    <p style="margin:0 0 12px;"><a href="https://arca.live/b/characterai/179799798" style="color:#72aaff;text-decoration:underline;">https://arca.live/b/characterai/179799798</a></p>
+    <p style="margin:0 0 12px;">이 플러그인에서 <strong>본편 옆에 별도의 AI 회의실을 열고 현재 RP를 함께 검토한다</strong>는 핵심 아이디어를 직접적으로 얻었음.</p>
+    <p style="margin:0 0 12px;">코드를 가져오거나 개작한 것은 아니지만, 발상의 출발점이 된 플러그인이므로 특별히 감사를 표함.</p>
+    <p style="margin:0 0 8px;">그럼에도 별도의 플러그인을 만든 이유는 다음과 같음.</p>
+    <ol style="margin:0;padding-left:24px;color:#cbd5e1;">
+      <li>편집회의·큐시트·스토리 아크 대신, 작가와 자유롭게 대화하고 필요한 내용만 메모로 전달하는 단순한 구조를 원했음.</li>
+      <li>작가의 시스템 프롬프트를 직접 확인하고 입맛대로 커스텀하고 싶었음.</li>
+      <li>작가에게 전달되는 컨텍스트와 로어북 상태를 더 세밀하게 관리하고 싶었음.</li>
+      <li>패널을 본편 위에 띄운 채 위치와 크기를 조절하고, 필요할 때 접었다 펼치면서 사용하고 싶었음.</li>
+    </ol>
+  </div>
+
+  <div style="padding:20px 22px;background:#11161d;border:1px solid #343d4a;border-radius:12px;">
+    <h3 style="margin:0 0 8px;color:#ffffff;font-size:19px;">Agents! : Customizable Multi Agents Pipeline for RisuAI</h3>
+    <p style="margin:0 0 12px;"><a href="https://arca.live/b/characterai/171256839" style="color:#72aaff;text-decoration:underline;">https://arca.live/b/characterai/171256839</a></p>
+    <p style="margin:0 0 12px;">플러그인의 전체적인 디자인 방향을 잡을 때 강하게 참고했음.</p>
+    <p style="margin:0;">제작자가 보면 “야, 내 플러그인은 이것보다 UI가 훨씬 좋은데 어디가 닮았다는 거야?”라고 할 수도 있음. 하지만 맛집 레시피를 열심히 따라 했다고 반드시 같은 맛이 나오는 것은 아니니까, 결과물이 얼마나 닮았는지는 몰라도 아무튼 열심히 참고한 것은 맞음.</p>
+  </div>
+</div>
