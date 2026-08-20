@@ -1,7 +1,7 @@
 //@name author_talk
-//@display-name ★작가 소환★ v1.0.1
+//@display-name ★작가 소환★ v1.0.2
 //@api 3.0
-//@version 1.0.1
+//@version 1.0.2
 
 declare const Risuai: any;
 
@@ -10,7 +10,7 @@ type LoreMode = "on" | "off" | "auto";
 type PromptKind = "base" | "additional";
 type WriterModelMode = "model" | "submodel";
 const DEFAULT_LORE_MODE: LoreMode = "auto";
-const PLUGIN_VERSION = "1.0.1";
+const PLUGIN_VERSION = "1.0.2";
 const PLUGIN_DISPLAY_NAME = "★작가 소환★";
 
 interface PromptPreset {
@@ -4101,7 +4101,7 @@ function installStyles(): void {
         .status.success { border-color:#2f5639; background:linear-gradient(90deg,rgba(25,70,39,.45),rgba(15,40,23,.72)); color:#9ce1a9; }
         .status.error { border-color:#74373d; background:linear-gradient(90deg,rgba(91,34,40,.48),rgba(48,20,24,.75)); color:#ffb0b6; }
         main { min-height:0; flex:1 1 auto; overflow:hidden; }
-        .panel { height:100%; padding:22px 28px 48px; }
+        .panel { height:100%; margin-right:10px; padding:22px 28px 48px; }
         .context-panel { max-width:none; padding-top:8px; }
         .context-note { min-height:38px; display:flex; align-items:center; margin:0 0 12px; padding:7px 12px; border:1px solid #29466d; border-radius:9px; background:linear-gradient(90deg,rgba(25,57,96,.42),rgba(13,28,47,.62)); color:#a7cdf7; font-size:12px; line-height:1.35; }
         .stats { gap:9px; margin:0 0 22px; }
@@ -4158,7 +4158,7 @@ function installStyles(): void {
         .toolbar-toggle input[type="checkbox"]::after, .toggle input[type="checkbox"]::after { content:""; width:var(--at-toggle-thumb-size); height:var(--at-toggle-thumb-size); position:absolute; top:50%; left:var(--at-toggle-inset); border-radius:50%; transform:translateY(-50%); background:#b9bdc2; box-shadow:0 1px 4px rgba(0,0,0,.6); transition:left .15s ease,background .15s ease; }
         .toolbar-toggle input[type="checkbox"]:checked, .toggle input[type="checkbox"]:checked { background:var(--at-accent); }
         .toolbar-toggle input[type="checkbox"]:checked::after, .toggle input[type="checkbox"]:checked::after { left:calc(var(--at-toggle-width) - var(--at-toggle-thumb-size) - var(--at-toggle-inset)); transform:translateY(-50%); background:white; }
-        .messages { padding:24px max(20px,calc((100vw - 920px)/2)); background:radial-gradient(circle at 50% 0,rgba(49,130,246,.035),transparent 38%); }
+        .messages { margin-right:10px; padding:24px max(20px,calc((100vw - 920px)/2)); background:radial-gradient(circle at 50% 0,rgba(49,130,246,.035),transparent 38%); }
         .message { margin-bottom:16px; padding:17px 19px; border-color:var(--at-border); border-radius:14px; background:rgba(18,22,27,.94); box-shadow:0 8px 24px rgba(0,0,0,.12); }
         .message.user { border-color:#29466d; background:linear-gradient(135deg,rgba(23,45,75,.88),rgba(19,31,48,.92)); }
         .message-role { color:#6ca9ff; }
