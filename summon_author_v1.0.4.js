@@ -1,10 +1,10 @@
 "use strict";
 //@name author_talk
-//@display-name ★작가 소환★ v1.0.3
+//@display-name ★작가 소환★ v1.0.4
 //@api 3.0
-//@version 1.0.3
+//@version 1.0.4
 const DEFAULT_LORE_MODE = "auto";
-const PLUGIN_VERSION = "1.0.3";
+const PLUGIN_VERSION = "1.0.4";
 const PLUGIN_DISPLAY_NAME = "★작가 소환★";
 const PLUGIN_PREFIX = "author_talk:";
 const SETTINGS_KEY = `${PLUGIN_PREFIX}settings:v1`;
@@ -2755,7 +2755,7 @@ async function requestWriterReply(room) {
         const raw = await Risuai.runLLMModel({
             mode: settings.writerModelMode,
             messages: writerRequestMessages(currentContext, room),
-            allowPlugins: false,
+            allowPlugins: true,
         });
         if (!await cancelWriterRequestForSessionChange(request))
             return;

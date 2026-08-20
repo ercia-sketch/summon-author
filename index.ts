@@ -1,7 +1,7 @@
 //@name author_talk
-//@display-name ★작가 소환★ v1.0.3
+//@display-name ★작가 소환★ v1.0.4
 //@api 3.0
-//@version 1.0.3
+//@version 1.0.4
 
 declare const Risuai: any;
 
@@ -10,7 +10,7 @@ type LoreMode = "on" | "off" | "auto";
 type PromptKind = "base" | "additional";
 type WriterModelMode = "model" | "submodel";
 const DEFAULT_LORE_MODE: LoreMode = "auto";
-const PLUGIN_VERSION = "1.0.3";
+const PLUGIN_VERSION = "1.0.4";
 const PLUGIN_DISPLAY_NAME = "★작가 소환★";
 
 interface PromptPreset {
@@ -2905,7 +2905,7 @@ async function requestWriterReply(room: WriterRoom): Promise<void> {
         const raw = await Risuai.runLLMModel({
             mode: settings.writerModelMode,
             messages: writerRequestMessages(currentContext, room),
-            allowPlugins: false,
+            allowPlugins: true,
         });
         if (!await cancelWriterRequestForSessionChange(request)) return;
         if (!isCurrentRequest(request)) {
