@@ -1,7 +1,7 @@
 //@name author_talk
-//@display-name 작가와의 대화 v0.15.3
+//@display-name 작가와의 대화 v0.15.4
 //@api 3.0
-//@version 0.15.3
+//@version 0.15.4
 
 declare const Risuai: any;
 
@@ -10,7 +10,7 @@ type LoreMode = "on" | "off" | "auto";
 type PromptKind = "base" | "additional";
 type WriterModelMode = "model" | "submodel";
 const DEFAULT_LORE_MODE: LoreMode = "auto";
-const PLUGIN_VERSION = "0.15.3";
+const PLUGIN_VERSION = "0.15.4";
 
 interface PromptPreset {
     id: string;
@@ -3942,12 +3942,12 @@ function installStyles(): void {
         .context-section-divider { height:1px; margin:22px 4px 18px; background:linear-gradient(90deg,transparent,#444b55 12%,#444b55 88%,transparent); }
         .context-other-group .context-block { border-color:#3b4149; background:linear-gradient(180deg,rgba(42,45,50,.92),rgba(31,34,38,.94)); }
         .context-other-group .context-block[open] > summary { background:rgba(255,255,255,.022); }
-        .slide-toggle-track { width:45px; height:25px; background:#343940; box-shadow:inset 0 1px 3px rgba(0,0,0,.45); }
-        .slide-toggle-thumb { width:21px; height:21px; margin:2px; background:#a8adb3; box-shadow:0 1px 4px rgba(0,0,0,.6); }
+        .slide-toggle-track { width:45px; height:25px; position:relative; background:#343940; box-shadow:inset 0 1px 3px rgba(0,0,0,.45); }
+        .slide-toggle-thumb { width:21px; height:21px; position:absolute; top:50%; left:2px; margin:0; transform:translateY(-50%); background:#a8adb3; box-shadow:0 1px 4px rgba(0,0,0,.6); transition:left .15s ease,background .15s ease; }
         .slide-toggle.on .slide-toggle-track { background:var(--at-accent); }
-        .slide-toggle.on .slide-toggle-thumb { transform:translateX(20px); background:white; }
+        .slide-toggle.on .slide-toggle-thumb { left:22px; transform:translateY(-50%); background:white; }
         .slide-toggle.off .slide-toggle-track { background:#343940; }
-        .slide-toggle.off .slide-toggle-thumb { background:#b9bdc2; }
+        .slide-toggle.off .slide-toggle-thumb { left:2px; transform:translateY(-50%); background:#b9bdc2; }
         .context-block summary .lore-bulk-actions { gap:7px; }
         .context-block summary .lore-bulk-actions button { padding:7px 10px; border-color:#3b424c; background:#14181d; color:#aeb4bc; }
         .lore-card { margin-bottom:10px; padding:13px 15px; border-radius:10px; background:#14181e; }
@@ -3992,6 +3992,9 @@ function installStyles(): void {
         .settings-grid { gap:14px; }
         .settings-grid label { padding:17px; border:1px solid var(--at-border); border-radius:12px; background:#12161b; color:#b9bec6; }
         .preset-editor { padding:20px; border-radius:13px; }
+        .preset-editor > .row.between { align-items:center; flex-direction:row; flex-wrap:wrap; margin-bottom:14px; }
+        .preset-editor > .row.between h3 { margin:0; }
+        .preset-editor > .row.between button { min-height:38px; padding:8px 12px; }
         .preset-editor h3, .danger-zone h3 { color:#f0f2f5; }
         .preset-editor .prompt { border-color:#343b46; background:#090e14; }
         .action-card { border-color:#655125; background:#2a2415; }
