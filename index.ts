@@ -1,7 +1,7 @@
 //@name author_talk
-//@display-name 작가와의 대화 v0.15.5
+//@display-name 작가와의 대화 v0.15.6
 //@api 3.0
-//@version 0.15.5
+//@version 0.15.6
 
 declare const Risuai: any;
 
@@ -10,7 +10,7 @@ type LoreMode = "on" | "off" | "auto";
 type PromptKind = "base" | "additional";
 type WriterModelMode = "model" | "submodel";
 const DEFAULT_LORE_MODE: LoreMode = "auto";
-const PLUGIN_VERSION = "0.15.5";
+const PLUGIN_VERSION = "0.15.6";
 
 interface PromptPreset {
     id: string;
@@ -25,6 +25,17 @@ interface MemoAction {
     content?: string;
 }
 
+interface MemoUndoChange {
+    uid: string;
+    before: Memo | null;
+    after: Memo | null;
+}
+
+interface MemoActionUndo {
+    changes: MemoUndoChange[];
+    createdFolder?: MemoFolder;
+}
+
 interface WriterMessage {
     id: string;
     role: WriterRole;
@@ -33,10 +44,7 @@ interface WriterMessage {
     pendingActions?: MemoAction[];
     memoNumberMap?: Record<string, string>;
     actionState?: "pending" | "applied" | "discarded" | "undone";
-    actionUndo?: {
-        memos: Memo[];
-        memoFolders?: MemoFolder[];
-    };
+    actionUndo?: MemoActionUndo;
 }
 
 interface WriterRoom {
@@ -226,9 +234,11 @@ interface CbsReferenceResult extends CbsProcessResult {
 interface ActiveWriterRequest {
     generation: number;
     characterId: string;
+    chatId: string;
     roomId: string;
     assistantMessageId: string;
     reader: ReadableStreamDefaultReader<any> | null;
+    identityTimer: number | null;
 }
 
 const PLUGIN_PREFIX = "author_talk:";
@@ -304,6 +314,7 @@ let statusMessage = "";
 let statusKind: "info" | "success" | "error" = "info";
 let memoReplacerReady = false;
 let memoReplacerPermissionDenied = false;
+let mainDomPermissionDenied = false;
 let settingsSaveTimer: number | undefined;
 let root: HTMLDivElement;
 let editingMessageId: string | null = null;
@@ -372,6 +383,7 @@ let parentResizeLayer: any = null;
 let parentResizeShield: any = null;
 
 let workspaceLoadPromise: Promise<BotWorkspace> | null = null;
+const storageReadFailures = new Set<string>();
 
 function safeClone<T>(value: T): T {
     try {
@@ -618,12 +630,16 @@ async function readStoredJson<T>(key: string, fallback: T): Promise<T> {
         if (typeof stored === "string") return JSON.parse(stored) as T;
         return safeClone(stored as T);
     } catch (error) {
+        storageReadFailures.add(key);
         console.error(`[Author Talk] Failed to read ${key}:`, error);
-        return safeClone(fallback);
+        throw new Error(`저장 데이터 “${key}”을 읽지 못했습니다. 원본 보호를 위해 이 데이터에는 새 내용을 저장하지 않습니다: ${errorMessage(error)}`);
     }
 }
 
 async function writeStoredJson(key: string, value: unknown): Promise<void> {
+    if (storageReadFailures.has(key)) {
+        throw new Error(`저장 데이터 “${key}”에 읽기 오류가 있어 원본 보호를 위해 덮어쓰지 않았습니다.`);
+    }
     await Risuai.pluginStorage.setItem(key, JSON.stringify(value));
 }
 
@@ -702,27 +718,37 @@ async function loadSettings(): Promise<PluginSettings> {
 
 function normalizeWriterMessage(value: any, memoFolderId: string): WriterMessage | null {
     if (!value || (value.role !== "user" && value.role !== "assistant") || typeof value.content !== "string") return null;
-    const undoFolders = Array.isArray(value.actionUndo?.memoFolders)
-        ? value.actionUndo.memoFolders
-            .filter((folder: any) => folder && typeof folder.id === "string" && typeof folder.name === "string")
-            .map((folder: any) => ({
-                id: folder.id,
-                name: folder.name.trim() || "이름 없는 폴더",
-                enabled: folder.enabled !== false,
-                createdAt: typeof folder.createdAt === "number" ? folder.createdAt : Date.now(),
-            }))
+    const normalizeUndoMemo = (memo: any): Memo | null => {
+        if (!memo || typeof memo.uid !== "string" || !memo.uid || typeof memo.content !== "string") return null;
+        return {
+            uid: memo.uid,
+            folderId: typeof memo.folderId === "string" ? memo.folderId : memoFolderId,
+            content: memo.content,
+            enabled: memo.enabled !== false,
+            createdAt: typeof memo.createdAt === "number" ? memo.createdAt : Date.now(),
+        };
+    };
+    const undoChanges: MemoUndoChange[] | null = Array.isArray(value.actionUndo?.changes)
+        ? value.actionUndo.changes.map((change: any): MemoUndoChange | null => {
+            if (!change || typeof change.uid !== "string" || !change.uid) return null;
+            const before = change.before === null ? null : normalizeUndoMemo(change.before);
+            const after = change.after === null ? null : normalizeUndoMemo(change.after);
+            if (before === null && after === null) return null;
+            if ((change.before !== null && before === null) || (change.after !== null && after === null)) return null;
+            return { uid: change.uid, before, after };
+        }).filter((change: MemoUndoChange | null): change is MemoUndoChange => change !== null)
         : null;
-    const undoMemos = Array.isArray(value.actionUndo?.memos)
-        ? value.actionUndo.memos
-            .filter((memo: any) => memo && typeof memo.content === "string")
-            .map((memo: any) => ({
-                uid: typeof memo.uid === "string" && memo.uid ? memo.uid : uuid(),
-                folderId: typeof memo.folderId === "string" ? memo.folderId : memoFolderId,
-                content: memo.content,
-                enabled: memo.enabled !== false,
-                createdAt: typeof memo.createdAt === "number" ? memo.createdAt : Date.now(),
-            }))
-        : null;
+    const undoFolderValue = value.actionUndo?.createdFolder;
+    const undoFolder: MemoFolder | undefined = undoFolderValue
+        && typeof undoFolderValue.id === "string"
+        && typeof undoFolderValue.name === "string"
+        ? {
+            id: undoFolderValue.id,
+            name: undoFolderValue.name.trim() || "이름 없는 폴더",
+            enabled: undoFolderValue.enabled !== false,
+            createdAt: typeof undoFolderValue.createdAt === "number" ? undoFolderValue.createdAt : Date.now(),
+        }
+        : undefined;
     return {
         id: typeof value.id === "string" ? value.id : uuid(),
         role: value.role,
@@ -733,7 +759,9 @@ function normalizeWriterMessage(value: any, memoFolderId: string): WriterMessage
             ? Object.fromEntries(Object.entries(value.memoNumberMap).filter(([number, uid]) => /^\d+$/.test(number) && typeof uid === "string")) as Record<string, string>
             : undefined,
         actionState: value.actionState,
-        actionUndo: undoMemos ? { memos: undoMemos, memoFolders: undoFolders ?? undefined } : undefined,
+        // v0.15.5 and earlier stored a full-workspace snapshot here. It is deliberately
+        // not migrated because restoring it could erase unrelated edits made afterward.
+        actionUndo: undoChanges && undoChanges.length > 0 ? { changes: undoChanges, createdFolder: undoFolder } : undefined,
     };
 }
 
@@ -821,7 +849,7 @@ async function migrateLegacyWorkspace(characterId: string, currentChatId: string
     try {
         keys = (await Risuai.pluginStorage.keys()).filter((key: string) => key.startsWith(legacyPrefix));
     } catch (error) {
-        console.warn("[Author Talk] Could not scan legacy sessions:", error);
+        throw new Error(`기존 회의실과 메모 목록을 읽지 못했습니다. 원본 보호를 위해 마이그레이션하지 않습니다: ${errorMessage(error)}`);
     }
     if (keys.length === 0) return { workspace, loreOverrides };
     workspace.rooms = [];
@@ -900,19 +928,9 @@ function mergeWorkspace(target: BotWorkspace, source: BotWorkspace): void {
             if (cloned.memoNumberMap) {
                 cloned.memoNumberMap = Object.fromEntries(Object.entries(cloned.memoNumberMap).map(([number, uid]) => [number, mappedMemoUid(uid)]));
             }
-            if (cloned.actionUndo) {
-                if (cloned.actionUndo.memoFolders) {
-                    cloned.actionUndo.memoFolders = cloned.actionUndo.memoFolders.map((folder) => ({
-                        ...folder,
-                        id: folderIdMap.get(folder.id) ?? uuid(),
-                    }));
-                }
-                cloned.actionUndo.memos = cloned.actionUndo.memos.map((memo) => ({
-                    ...memo,
-                    uid: mappedMemoUid(memo.uid),
-                    folderId: folderIdMap.get(memo.folderId) ?? fallbackFolderId,
-                }));
-            }
+            // Undo records from a separately migrated workspace cannot be reconciled
+            // safely after memo and folder IDs are remapped.
+            cloned.actionUndo = undefined;
             return cloned;
         });
         target.rooms.push({ ...safeClone(room), id, writerMessages });
@@ -1181,9 +1199,10 @@ function evaluateCbsInline(inner: string, raw: string, environment: CbsEnvironme
         case "greater_equal": return { text: bool(Number(args[0]) >= Number(args[1])) };
         case "lessequal":
         case "less_equal": return { text: bool(Number(args[0]) <= Number(args[1])) };
-        case "and": return { text: bool(cbsTruthy(args[0] ?? "") && cbsTruthy(args[1] ?? "")) };
-        case "or": return { text: bool(cbsTruthy(args[0] ?? "") || cbsTruthy(args[1] ?? "")) };
-        case "not": return { text: bool(!cbsTruthy(args[0] ?? "")) };
+        // RisuAI's inline boolean functions treat only the literal "1" as true.
+        case "and": return { text: bool((args[0] ?? "") === "1" && (args[1] ?? "") === "1") };
+        case "or": return { text: bool((args[0] ?? "") === "1" || (args[1] ?? "") === "1") };
+        case "not": return { text: bool((args[0] ?? "") !== "1") };
         case "contains": return { text: bool((args[0] ?? "").includes(args[1] ?? "")) };
         case "startswith": return { text: bool((args[0] ?? "").startsWith(args[1] ?? "")) };
         case "endswith": return { text: bool((args[0] ?? "").endsWith(args[1] ?? "")) };
@@ -1200,7 +1219,7 @@ function evaluateCbsInline(inner: string, raw: string, environment: CbsEnvironme
         case "floor": return { text: String(Math.floor(Number(args[0]))) };
         case "ceil": return { text: String(Math.ceil(Number(args[0]))) };
         case "abs": return { text: String(Math.abs(Number(args[0]))) };
-        case "tonumber": return { text: String(Number(args[0])) };
+        case "tonumber": return { text: [...(args[0] ?? "")].filter((value) => !Number.isNaN(Number(value)) || value === ".").join("") };
         case "split": return { text: JSON.stringify((args[0] ?? "").split(args[1] ?? "")) };
         case "join": {
             try {
@@ -1914,18 +1933,6 @@ function evaluateLoreEntry(view: LoreView, identity: SessionIdentity, searchable
     return { active: true, reason: loreReasonForSource(matchedSource) };
 }
 
-function evaluateStandaloneAutoLore(entry: any, key: string, identity: SessionIdentity, searchableMessages: string[], memoTexts: string[], scanDepth: number, fullWord: boolean): { active: boolean; reason: string } {
-    const activation = parseLoreActivationConfig(entry, identity, scanDepth, fullWord);
-    const view = {
-        key,
-        mode: "auto",
-        activation,
-        unsupportedFeatures: [...activation.unsupportedFeatures],
-        raw: entry,
-    } as LoreView;
-    return evaluateLoreEntry(view, identity, searchableMessages, memoTexts, []);
-}
-
 function evaluateLoreViews(views: LoreView[], identity: SessionIdentity, searchableMessages: string[], memos: Memo[]): void {
     const recursiveScanning = identity.character?.loreSettings?.recursiveScanning ?? true;
     const memoTexts = memos.map((memo) => memo.content.trim()).filter(Boolean);
@@ -2210,37 +2217,90 @@ function requestAlreadyContainsLore(messages: any[], content: string): boolean {
     return requestText.includes(head) && requestText.includes(tail);
 }
 
+function buildSupplementalAutoLoreViews(entries: any[], identity: SessionIdentity, searchableMessages: string[], cbsEnvironment: CbsEnvironment, memos: Memo[]): LoreView[] {
+    const scanDepth = clampInteger(identity.character?.loreSettings?.scanDepth, 5, 1, 1000);
+    const fullWord = Boolean(identity.character?.loreSettings?.fullWordMatching);
+    const locallyActivatedIds = new Set(entries
+        .filter((entry: any) => entry?.mode === "child" && typeof entry?.id === "string" && entry.id)
+        .map((entry: any) => entry.id));
+    const duplicateCounter = new Map<string, number>();
+    const views = entries.filter((entry: any) => entry?.mode !== "folder" && entry?.mode !== "child").map((entry: any, index: number): LoreView => {
+        const signature = loreSignature(entry);
+        const occurrence = (duplicateCounter.get(signature) ?? 0) + 1;
+        duplicateCounter.set(signature, occurrence);
+        const key = `memo-supplement:${entry?.id || signature}:${occurrence}`;
+        const activation = parseLoreActivationConfig(entry, identity, scanDepth, fullWord);
+        const processed = processCbsReference(activation.content, cbsEnvironment, true);
+        // An unsupported CBS block must never be injected raw into the main request.
+        // Marking it unsupported also prevents partially processed text from driving recursion.
+        if (processed.warnings.length > 0) {
+            activation.unsupportedFeatures = uniqueWarnings([...activation.unsupportedFeatures, "미지원 CBS 문법"]);
+        }
+        return {
+            key,
+            name: String(entry?.comment || entry?.key || `Lorebook ${index + 1}`),
+            source: "module",
+            mode: "auto",
+            active: false,
+            reason: "",
+            content: processed.text.trim(),
+            rawContent: String(entry?.content ?? ""),
+            displayHtml: processed.html,
+            estimatedTokens: estimateTokenCount(processed.text),
+            rawEstimatedTokens: estimateTokenCount(String(entry?.content ?? "")),
+            unsupportedCbs: processed.warnings,
+            unsupportedFeatures: [...activation.unsupportedFeatures],
+            activation,
+            raw: entry,
+            folderKey: String(entry?.folder ?? ""),
+            locallyActivated: locallyActivatedIds.has(String(entry?.id ?? "")),
+        };
+    });
+    evaluateLoreViews(views, identity, searchableMessages, memos);
+    return views;
+}
+
 async function buildMemoTriggeredLoreBlock(identity: SessionIdentity, workspace: BotWorkspace, messages: any[]): Promise<string> {
     const memos = activeMemos(workspace);
     if (memos.length === 0) return "";
-    const memoText = memos.map((memo) => memo.content.trim()).filter(Boolean).join("\n");
-    if (!memoText) return "";
 
     const rawEntries = await Risuai.getCurrentLorebookEntries();
     const entries: any[] = Array.isArray(rawEntries) ? rawEntries : [];
-    const searchable = buildChatHistory(identity.character, identity.chat).searchable;
-    const scanDepth = clampInteger(identity.character?.loreSettings?.scanDepth, 5, 1, 1000);
-    const fullWord = Boolean(identity.character?.loreSettings?.fullWordMatching);
+    let database: any = null;
+    try {
+        database = await Risuai.getDatabase(["personas", "selectedPersona"]);
+    } catch (error) {
+        console.warn("[Author Talk] Persona data was unavailable while evaluating memo-triggered lore:", error);
+    }
+    const cbsEnvironment = buildCbsEnvironment(identity, database);
+    const searchable = buildChatHistory(identity.character, identity.chat).searchable
+        .map((message) => processCbsText(message, cbsEnvironment, true).text);
+    const withoutMemo = buildSupplementalAutoLoreViews(entries, identity, searchable, cbsEnvironment, []);
+    const withMemo = buildSupplementalAutoLoreViews(entries, identity, searchable, cbsEnvironment, memos);
+    const withoutMemoByKey = new Map(withoutMemo.map((view) => [view.key, view]));
     const seenContent = new Set<string>();
     const triggered: Array<{ name: string; content: string; order: number }> = [];
+    const skippedUnsupported: string[] = [];
 
-    for (let index = 0; index < entries.length; index++) {
-        const entry = entries[index];
-        const activation = parseLoreActivationConfig(entry, identity, scanDepth, fullWord);
-        const content = activation.content.trim();
-        if (!content || entry?.mode === "folder" || entry?.mode === "child" || entry?.alwaysActive) continue;
-        const signature = loreSignature(entry);
-        const withoutMemo = evaluateStandaloneAutoLore(entry, signature, identity, searchable, [], scanDepth, fullWord);
-        const withMemo = evaluateStandaloneAutoLore(entry, signature, identity, searchable, [memoText], scanDepth, fullWord);
-        if (withoutMemo.active || !withMemo.active || requestAlreadyContainsLore(messages, content)) continue;
+    for (const view of withMemo) {
+        if (withoutMemoByKey.get(view.key)?.active || !view.active) continue;
+        if (view.unsupportedCbs.length > 0 || view.activation.unsupportedFeatures.length > 0) {
+            skippedUnsupported.push(view.name);
+            continue;
+        }
+        const content = view.content.trim();
+        if (!content || requestAlreadyContainsLore(messages, content)) continue;
         const normalized = normalizedComparableText(content);
         if (seenContent.has(normalized)) continue;
         seenContent.add(normalized);
         triggered.push({
-            name: String(entry?.comment || entry?.key || `Lorebook ${index + 1}`),
+            name: view.name,
             content,
-            order: Number.isFinite(Number(entry?.insertorder)) ? Number(entry.insertorder) : 100,
+            order: Number.isFinite(Number(view.raw?.insertorder)) ? Number(view.raw.insertorder) : 100,
         });
+    }
+    if (skippedUnsupported.length > 0) {
+        console.warn(`[Author Talk] Memo-triggered lore skipped because it uses unsupported processing: ${uniqueWarnings(skippedUnsupported).join(", ")}`);
     }
 
     if (triggered.length === 0) return "";
@@ -2252,6 +2312,23 @@ async function buildMemoTriggeredLoreBlock(identity: SessionIdentity, workspace:
 
 async function applySafeStyles(element: any, styles: Array<[string, string]>): Promise<void> {
     for (const [property, value] of styles) await element.setStyle(property, value);
+}
+
+async function ensureMainDocumentAccess(): Promise<boolean> {
+    if (mainDocument) return true;
+    if (mainDomPermissionDenied) return false;
+    try {
+        const granted = await Risuai.requestPluginPermission("mainDom");
+        if (!granted) {
+            mainDomPermissionDenied = true;
+            return false;
+        }
+        mainDocument = await Risuai.getRootDocument();
+        return Boolean(mainDocument);
+    } catch (error) {
+        console.warn("[Author Talk] Main document access was unavailable:", error);
+        return false;
+    }
 }
 
 async function removeVisualMemoReceipts(): Promise<void> {
@@ -2324,7 +2401,12 @@ async function ensureMemoReceiptObserver(): Promise<void> {
 
 async function displayMemoReceipt(identity: SessionIdentity, block: string): Promise<void> {
     // This is deliberately visual-only. It never calls a character/chat mutation API.
-    if (!mainDocument) return;
+    try {
+        if (!await ensureMainDocumentAccess()) return;
+    } catch (error) {
+        console.warn("[Author Talk] Could not prepare the visual memo receipt:", error);
+        return;
+    }
     const messages = Array.isArray(identity.chat?.message) ? identity.chat.message : [];
     let userMessageIndex = -1;
     for (let index = messages.length - 1; index >= 0; index--) {
@@ -2411,7 +2493,7 @@ async function hasStoredActiveMemo(): Promise<boolean> {
 async function requestInitialPermissions(): Promise<void> {
     try {
         const databaseGranted = await Risuai.requestPluginPermission("db");
-        const mainDomGranted = await Risuai.requestPluginPermission("mainDom");
+        const mainDomGranted = await ensureMainDocumentAccess();
         const replacerGranted = await ensureMemoReplacer();
         if (!databaseGranted || !mainDomGranted || !replacerGranted) {
             setStatus("일부 권한이 거부되었습니다. 해당 기능은 권한을 허용할 때까지 제한됩니다.", "error", false);
@@ -2453,6 +2535,34 @@ function parseMemoActions(text: string): { cleanText: string; actions?: MemoActi
     }
 }
 
+function memoEquals(left: Memo | undefined | null, right: Memo | undefined | null): boolean {
+    if (!left || !right) return left === right;
+    return left.uid === right.uid
+        && left.folderId === right.folderId
+        && left.content === right.content
+        && left.enabled === right.enabled
+        && left.createdAt === right.createdAt;
+}
+
+function memoFolderEquals(left: MemoFolder | undefined | null, right: MemoFolder | undefined | null): boolean {
+    if (!left || !right) return left === right;
+    return left.id === right.id
+        && left.name === right.name
+        && left.enabled === right.enabled
+        && left.createdAt === right.createdAt;
+}
+
+function memoUndoChanges(before: Memo[], after: Memo[]): MemoUndoChange[] {
+    const beforeByUid = new Map(before.map((memo) => [memo.uid, memo]));
+    const afterByUid = new Map(after.map((memo) => [memo.uid, memo]));
+    const uids = new Set([...beforeByUid.keys(), ...afterByUid.keys()]);
+    return [...uids].filter((uid) => !memoEquals(beforeByUid.get(uid), afterByUid.get(uid))).map((uid) => ({
+        uid,
+        before: beforeByUid.has(uid) ? safeClone(beforeByUid.get(uid)!) : null,
+        after: afterByUid.has(uid) ? safeClone(afterByUid.get(uid)!) : null,
+    }));
+}
+
 async function applyMemoActions(messageId: string): Promise<void> {
     const room = getCurrentRoom();
     if (!currentWorkspace || !room) return;
@@ -2463,12 +2573,14 @@ async function applyMemoActions(messageId: string): Promise<void> {
     const numberMap = message.memoNumberMap ?? memoUidSnapshot(currentWorkspace);
     try {
         let writerFolderId = "";
+        let createdFolder: MemoFolder | undefined;
         if (message.pendingActions.some((action) => action.operation === "create")) {
             const folderName = writerMemoFolderName();
             let writerFolder = nextFolders.find((folder) => folder.name.trim() === folderName);
             if (!writerFolder) {
                 writerFolder = { id: uuid(), name: folderName, enabled: true, createdAt: Date.now() };
                 nextFolders.push(writerFolder);
+                createdFolder = safeClone(writerFolder);
             }
             writerFolderId = writerFolder.id;
         }
@@ -2483,14 +2595,24 @@ async function applyMemoActions(messageId: string): Promise<void> {
             if (action.operation === "update") nextMemos[index].content = action.content!;
             else nextMemos.splice(index, 1);
         }
-        message.actionUndo = {
-            memos: safeClone(currentWorkspace.memos),
-            memoFolders: safeClone(currentWorkspace.memoFolders),
-        };
+        const previousMemos = currentWorkspace.memos;
+        const previousFolders = currentWorkspace.memoFolders;
+        const previousUndo = message.actionUndo;
+        const changes = memoUndoChanges(previousMemos, nextMemos);
+        if (changes.length === 0) throw new Error("실제로 변경되는 메모가 없습니다.");
+        message.actionUndo = { changes, createdFolder };
         currentWorkspace.memoFolders = nextFolders;
         currentWorkspace.memos = nextMemos.sort((a, b) => a.createdAt - b.createdAt || a.uid.localeCompare(b.uid));
         message.actionState = "applied";
-        await saveCurrentWorkspace();
+        try {
+            await saveCurrentWorkspace();
+        } catch (error) {
+            currentWorkspace.memoFolders = previousFolders;
+            currentWorkspace.memos = previousMemos;
+            message.actionUndo = previousUndo;
+            message.actionState = "pending";
+            throw error;
+        }
         if (activeMemos(currentWorkspace).length > 0) await ensureMemoReplacer();
         currentContext = null;
         setStatus("작가가 제안한 메모 작업을 적용했습니다.", "success");
@@ -2505,36 +2627,120 @@ async function undoMemoActions(messageId: string): Promise<void> {
     if (!currentWorkspace || !room) return;
     const message = room.writerMessages.find((item) => item.id === messageId);
     if (!message?.actionUndo || message.actionState !== "applied") return;
-    if (message.actionUndo.memoFolders?.length) currentWorkspace.memoFolders = safeClone(message.actionUndo.memoFolders);
-    const validFolderIds = new Set(currentWorkspace.memoFolders.map((folder) => folder.id));
-    const fallbackFolderId = currentWorkspace.memoFolders[0]?.id ?? "";
-    currentWorkspace.memos = safeClone(message.actionUndo.memos).map((memo) => ({
-        ...memo,
-        folderId: validFolderIds.has(memo.folderId) ? memo.folderId : fallbackFolderId,
-    }));
-    message.actionState = "undone";
-    await saveCurrentWorkspace();
-    currentContext = null;
-    setStatus("메모 작업을 실행 취소했습니다.", "success");
+    try {
+        const currentByUid = new Map(currentWorkspace.memos.map((memo) => [memo.uid, memo]));
+        for (const change of message.actionUndo.changes) {
+            if (!memoEquals(currentByUid.get(change.uid), change.after)) {
+                throw new Error("적용 이후 해당 메모가 직접 수정되어 안전하게 실행 취소할 수 없습니다.");
+            }
+            if (change.before && !currentWorkspace.memoFolders.some((folder) => folder.id === change.before!.folderId)) {
+                throw new Error("삭제된 메모의 원래 폴더가 없어 안전하게 실행 취소할 수 없습니다.");
+            }
+        }
+
+        const previousMemos = currentWorkspace.memos;
+        const previousFolders = currentWorkspace.memoFolders;
+        const nextMemos = safeClone(currentWorkspace.memos);
+        for (const change of message.actionUndo.changes) {
+            const index = nextMemos.findIndex((memo) => memo.uid === change.uid);
+            if (change.before === null) {
+                if (index >= 0) nextMemos.splice(index, 1);
+            } else if (index >= 0) {
+                nextMemos[index] = safeClone(change.before);
+            } else {
+                nextMemos.push(safeClone(change.before));
+            }
+        }
+        const nextFolders = safeClone(currentWorkspace.memoFolders);
+        const createdFolder = message.actionUndo.createdFolder;
+        if (createdFolder && !nextMemos.some((memo) => memo.folderId === createdFolder.id)) {
+            const folderIndex = nextFolders.findIndex((folder) => folder.id === createdFolder.id);
+            if (folderIndex >= 0 && memoFolderEquals(nextFolders[folderIndex], createdFolder)) nextFolders.splice(folderIndex, 1);
+        }
+        currentWorkspace.memoFolders = nextFolders;
+        currentWorkspace.memos = nextMemos.sort((a, b) => a.createdAt - b.createdAt || a.uid.localeCompare(b.uid));
+        message.actionState = "undone";
+        try {
+            await saveCurrentWorkspace();
+        } catch (error) {
+            currentWorkspace.memoFolders = previousFolders;
+            currentWorkspace.memos = previousMemos;
+            message.actionState = "applied";
+            throw error;
+        }
+        currentContext = null;
+        setStatus("메모 작업을 실행 취소했습니다.", "success");
+    } catch (error) {
+        setStatus(`메모 작업을 실행 취소하지 않았습니다: ${errorMessage(error)}`, "error");
+    }
     render();
 }
 
-function streamChunkText(chunk: any, accumulated: string): string {
-    if (typeof chunk === "string") return accumulated + chunk;
-    if (chunk instanceof Uint8Array) return accumulated + new TextDecoder().decode(chunk, { stream: true });
+function mergeStreamText(accumulated: string, incoming: string): string {
+    if (!incoming) return accumulated;
+    if (!accumulated || incoming.startsWith(accumulated)) return incoming;
+    return accumulated + incoming;
+}
+
+function streamChunkText(chunk: any, accumulated: string, decoder: TextDecoder): { text: string; decodedBytes: boolean } {
+    if (typeof chunk === "string") return { text: mergeStreamText(accumulated, chunk), decodedBytes: false };
+    if (chunk instanceof Uint8Array) return { text: accumulated + decoder.decode(chunk, { stream: true }), decodedBytes: true };
     if (chunk && typeof chunk === "object") {
-        if (typeof chunk["0"] === "string") return chunk["0"];
-        if (typeof chunk.text === "string") return accumulated + chunk.text;
-        if (typeof chunk.content === "string") return accumulated + chunk.content;
+        if (typeof chunk["0"] === "string") return { text: chunk["0"], decodedBytes: false };
+        if (typeof chunk.text === "string") return { text: mergeStreamText(accumulated, chunk.text), decodedBytes: false };
+        if (typeof chunk.content === "string") return { text: mergeStreamText(accumulated, chunk.content), decodedBytes: false };
     }
-    return accumulated;
+    return { text: accumulated, decodedBytes: false };
+}
+
+function firstMultilineWriterAnswer(result: unknown): string {
+    if (!Array.isArray(result)) return "";
+    const firstAssistant = result.find((candidate: any) => Array.isArray(candidate) && ["char", "assistant"].includes(String(candidate[0])) && typeof candidate[1] === "string");
+    if (firstAssistant) return firstAssistant[1];
+    const first = result[0];
+    return Array.isArray(first) && typeof first[1] === "string" ? first[1] : typeof first === "string" ? first : "";
+}
+
+function ownsWriterRequest(request: ActiveWriterRequest): boolean {
+    return activeWriterRequest === request && request.generation === requestGeneration;
 }
 
 function isCurrentRequest(request: ActiveWriterRequest): boolean {
-    return activeWriterRequest === request
-        && request.generation === requestGeneration
+    return ownsWriterRequest(request)
         && currentIdentity?.characterId === request.characterId
+        && currentIdentity?.chatId === request.chatId
         && Boolean(currentWorkspace?.rooms.some((room) => room.id === request.roomId));
+}
+
+function clearWriterRequestIdentityMonitor(request: ActiveWriterRequest): void {
+    if (request.identityTimer !== null) window.clearInterval(request.identityTimer);
+    request.identityTimer = null;
+}
+
+async function cancelWriterRequestForSessionChange(request: ActiveWriterRequest): Promise<boolean> {
+    if (!ownsWriterRequest(request)) return false;
+    const identity = await resolveSessionIdentity();
+    if (identity?.characterId === request.characterId && identity.chatId === request.chatId) return true;
+    await abandonActiveWriterRequest("봇 또는 채팅이 변경되어 이전 작가 요청을 중단했습니다.");
+    currentContext = null;
+    try {
+        await ensureCurrentWorkspace();
+    } catch (error) {
+        setStatus(`새 세션을 불러오지 못했습니다: ${errorMessage(error)}`, "error", false);
+    }
+    render();
+    return false;
+}
+
+function startWriterRequestIdentityMonitor(request: ActiveWriterRequest): void {
+    let checking = false;
+    request.identityTimer = window.setInterval(() => {
+        if (checking || !ownsWriterRequest(request)) return;
+        checking = true;
+        void cancelWriterRequestForSessionChange(request)
+            .catch((error) => console.warn("[Author Talk] Could not check the active Writer session:", error))
+            .finally(() => { checking = false; });
+    }, 300);
 }
 
 async function readWriterResponse(raw: any, onText: (text: string) => void, request: ActiveWriterRequest): Promise<string> {
@@ -2549,6 +2755,12 @@ async function readWriterResponse(raw: any, onText: (text: string) => void, requ
         onText(result);
         return result;
     }
+    if (raw?.type === "multiline") {
+        const result = firstMultilineWriterAnswer(raw.result);
+        if (!result) throw new Error("Writer model returned an empty multiline response.");
+        onText(result);
+        return result;
+    }
     const stream = raw instanceof ReadableStream
         ? raw
         : raw?.type === "streaming" && raw.result instanceof ReadableStream
@@ -2558,6 +2770,8 @@ async function readWriterResponse(raw: any, onText: (text: string) => void, requ
         const reader = stream.getReader();
         request.reader = reader;
         let accumulated = "";
+        const decoder = new TextDecoder();
+        let decodedBytes = false;
         while (true) {
             const { done, value } = await reader.read();
             if (!isCurrentRequest(request)) {
@@ -2565,7 +2779,13 @@ async function readWriterResponse(raw: any, onText: (text: string) => void, requ
                 return "";
             }
             if (done) break;
-            accumulated = streamChunkText(value, accumulated);
+            const merged = streamChunkText(value, accumulated, decoder);
+            accumulated = merged.text;
+            decodedBytes ||= merged.decodedBytes;
+            onText(accumulated);
+        }
+        if (decodedBytes) {
+            accumulated += decoder.decode();
             onText(accumulated);
         }
         return accumulated;
@@ -2629,6 +2849,7 @@ async function abandonActiveWriterRequest(message = "이전 요청을 취소했�
     const request = activeWriterRequest;
     activeWriterRequest = null;
     isSending = false;
+    if (request) clearWriterRequestIdentityMonitor(request);
     if (request?.reader) void request.reader.cancel().catch(() => {});
     let saveError: unknown = null;
     if (request && currentWorkspace && currentIdentity?.characterId === request.characterId) {
@@ -2657,11 +2878,14 @@ async function requestWriterReply(room: WriterRoom): Promise<void> {
     const request: ActiveWriterRequest = {
         generation: ++requestGeneration,
         characterId: currentIdentity.characterId,
+        chatId: currentIdentity.chatId,
         roomId: room.id,
         assistantMessageId: assistantMessage.id,
         reader: null,
+        identityTimer: null,
     };
     activeWriterRequest = request;
+    startWriterRequestIdentityMonitor(request);
     isSending = true;
     setStatus("작가가 자료를 검토하고 있습니다…", "info", false);
     render();
@@ -2675,6 +2899,7 @@ async function requestWriterReply(room: WriterRoom): Promise<void> {
             messages: writerRequestMessages(currentContext, room),
             allowPlugins: false,
         });
+        if (!await cancelWriterRequestForSessionChange(request)) return;
         if (!isCurrentRequest(request)) {
             const staleStream = raw instanceof ReadableStream ? raw : raw?.type === "streaming" && raw.result instanceof ReadableStream ? raw.result : null;
             if (staleStream) void staleStream.cancel().catch(() => {});
@@ -2685,6 +2910,7 @@ async function requestWriterReply(room: WriterRoom): Promise<void> {
             assistantMessage.content = partial;
             render();
         }, request);
+        if (!await cancelWriterRequestForSessionChange(request)) return;
         if (!isCurrentRequest(request)) return;
         if (!fullText.trim()) throw new Error("작가 모델이 빈 응답을 반환했습니다.");
         const parsed = parseMemoActions(fullText);
@@ -2702,7 +2928,8 @@ async function requestWriterReply(room: WriterRoom): Promise<void> {
         setStatus(assistantMessage.content, "error", false);
         await saveCurrentWorkspace();
     } finally {
-        if (isCurrentRequest(request)) {
+        clearWriterRequestIdentityMonitor(request);
+        if (ownsWriterRequest(request)) {
             activeWriterRequest = null;
             isSending = false;
             render();
@@ -2747,7 +2974,10 @@ function renderActionPreview(message: WriterMessage): string {
         return `<div class="action-card"><strong>메모 작업 제안</strong><ul>${summary}</ul><div class="row"><button data-action="apply-actions" data-message-id="${escapeHtml(message.id)}" class="primary">메모에 적용</button><button data-action="discard-actions" data-message-id="${escapeHtml(message.id)}">무시</button></div></div>`;
     }
     if (message.actionState === "applied") {
-        return `<div class="action-card success"><strong>메모에 적용됨</strong><ul>${summary}</ul><button data-action="undo-actions" data-message-id="${escapeHtml(message.id)}">실행 취소</button></div>`;
+        const undoControl = message.actionUndo
+            ? `<button data-action="undo-actions" data-message-id="${escapeHtml(message.id)}">실행 취소</button>`
+            : `<span class="meta">이전 버전에서 적용된 작업은 안전한 실행 취소를 지원하지 않습니다.</span>`;
+        return `<div class="action-card success"><strong>메모에 적용됨</strong><ul>${summary}</ul>${undoControl}</div>`;
     }
     return `<div class="action-card muted"><strong>${message.actionState === "undone" ? "적용 취소됨" : "제안 무시됨"}</strong><ul>${summary}</ul></div>`;
 }
@@ -4260,13 +4490,10 @@ async function removeMainResizeBridge(): Promise<void> {
 
 async function prepareHostFrameDetection(): Promise<Array<{ frame: any; display: string }> | null> {
     try {
-        const granted = await Risuai.requestPluginPermission("mainDom");
-        if (!granted) {
+        if (!await ensureMainDocumentAccess()) {
             setStatus("플로팅 패널 권한이 거부되어 전체 화면으로 열었습니다.", "error", false);
             return null;
         }
-        mainDocument = await Risuai.getRootDocument();
-        if (!mainDocument) return null;
         await ensureMainResizeBridge();
         hostFrame = await mainDocument.querySelector('iframe[x-author-talk-host="true"]');
         if (hostFrame) return [];
@@ -4499,13 +4726,24 @@ async function openWriterRoom(): Promise<void> {
     panelMinimized = false;
     await findAndConfigureHostFrame(frameSnapshot);
     await ensureMainResizeBridge();
-    const okay = await ensureCurrentWorkspace();
+    let okay = false;
+    try {
+        okay = await ensureCurrentWorkspace();
+    } catch (error) {
+        setStatus(`작업공간을 불러오지 못했습니다: ${errorMessage(error)}`, "error", false);
+    }
     render();
     if (okay && !currentContext) await refreshContext();
 }
 
 async function initialize(): Promise<void> {
-    settings = await loadSettings();
+    let settingsLoadError: unknown = null;
+    try {
+        settings = await loadSettings();
+    } catch (error) {
+        settingsLoadError = error;
+        settings = safeClone(DEFAULT_SETTINGS);
+    }
     installStyles();
     root = document.createElement("div");
     root.id = "author-talk-root";
@@ -4532,23 +4770,45 @@ async function initialize(): Promise<void> {
     await Risuai.onUnload(async () => {
         panelOpen = false;
         if (settingsSaveTimer !== undefined) window.clearTimeout(settingsSaveTimer);
+        settingsSaveTimer = undefined;
         if (memoReceiptRepairTimer !== undefined) window.clearTimeout(memoReceiptRepairTimer);
-        await finishPanelResize();
-        pendingResizeGeometry = null;
-        await saveSettings();
-        await saveCurrentWorkspace();
-        if (memoReplacerReady) await Risuai.removeRisuReplacer("beforeRequest", memoReplacer);
-        memoReceiptState = null;
-        if (memoReceiptObserver) {
-            await memoReceiptObserver.disconnect();
-            memoReceiptObserver = null;
+        memoReceiptRepairTimer = undefined;
+        const request = activeWriterRequest;
+        requestGeneration++;
+        activeWriterRequest = null;
+        isSending = false;
+        if (request) {
+            clearWriterRequestIdentityMonitor(request);
+            if (request.reader) void request.reader.cancel().catch(() => {});
         }
-        await removeVisualMemoReceipts();
-        await removeParentResizeHandles();
-        await removeMainResizeBridge();
+        pendingResizeGeometry = null;
+        memoReceiptState = null;
+        const observer = memoReceiptObserver;
+        memoReceiptObserver = null;
+        const cleanupTasks: Promise<unknown>[] = [
+            finishPanelResize(),
+            removeVisualMemoReceipts(),
+            removeParentResizeHandles(),
+            removeMainResizeBridge(),
+        ];
+        if (memoReplacerReady) cleanupTasks.push(Risuai.removeRisuReplacer("beforeRequest", memoReplacer));
+        if (observer) cleanupTasks.push(observer.disconnect());
+        memoReplacerReady = false;
+        const cleanupResults = await Promise.allSettled(cleanupTasks);
+        for (const result of cleanupResults) {
+            if (result.status === "rejected") console.warn("[Author Talk] Cleanup step failed during unload:", result.reason);
+        }
+        const saveResults = await Promise.allSettled([saveSettings(), saveCurrentWorkspace()]);
+        for (const result of saveResults) {
+            if (result.status === "rejected") console.error("[Author Talk] Save failed during unload:", result.reason);
+        }
     });
 
     await requestInitialPermissions();
+    if (settingsLoadError) {
+        setStatus(`설정을 읽지 못했습니다. 원본 보호를 위해 이번 실행에서는 설정 저장을 차단했습니다: ${errorMessage(settingsLoadError)}`, "error", false);
+        render();
+    }
     console.log("[Author Talk] Plugin initialized.");
 }
 
