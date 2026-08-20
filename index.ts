@@ -1,7 +1,7 @@
 //@name author_talk
-//@display-name 작가와의 대화 v0.15.2
+//@display-name 작가와의 대화 v0.15.3
 //@api 3.0
-//@version 0.15.2
+//@version 0.15.3
 
 declare const Risuai: any;
 
@@ -10,7 +10,7 @@ type LoreMode = "on" | "off" | "auto";
 type PromptKind = "base" | "additional";
 type WriterModelMode = "model" | "submodel";
 const DEFAULT_LORE_MODE: LoreMode = "auto";
-const PLUGIN_VERSION = "0.15.2";
+const PLUGIN_VERSION = "0.15.3";
 
 interface PromptPreset {
     id: string;
@@ -2871,13 +2871,14 @@ function renderContextDisplay(displayHtml: string, fallback: string, warnings: s
 }
 
 function renderUnsupportedSyntaxToggle(key: string): string {
-    const on = omitsUnsupportedSyntax(key);
-    return `<button data-action="toggle-unsupported-syntax" data-syntax-key="${escapeHtml(key)}" class="syntax-omit-toggle ${on ? "on" : "off"}" title="${on ? "미지원 문법을 작가에게 전달하지 않음" : "미지원 문법 원문을 작가에게 전달함"}" aria-pressed="${on}"><span class="syntax-toggle-label">미지원 문법 작가에게 전달 안 함</span><span class="syntax-toggle-track" aria-hidden="true"><span class="syntax-toggle-thumb"></span></span></button>`;
+    const omit = omitsUnsupportedSyntax(key);
+    const escapedKey = escapeHtml(key);
+    return `<div class="syntax-delivery-choice" role="group" aria-label="미지원 문법 작가 전달 여부"><button data-action="set-unsupported-syntax" data-syntax-key="${escapedKey}" data-omit="true" class="${omit ? "selected" : ""}" aria-pressed="${omit}">전달 안 함</button><button data-action="set-unsupported-syntax" data-syntax-key="${escapedKey}" data-omit="false" class="${!omit ? "selected" : ""}" aria-pressed="${!omit}">전달함</button></div>`;
 }
 
 function renderLoreCard(entry: LoreView): string {
     const localBadge = entry.locallyActivated ? `<span class="local-lore-badge">채팅 로컬 활성화</span>` : "";
-    return `<details class="lore-card ${entry.active ? "active" : "inactive"}" data-lore-card="${escapeHtml(entry.key)}"><summary class="lore-card-summary"><div class="lore-summary-main"><div class="source-title"><strong>${escapeHtml(entry.name)}</strong>${localBadge}${renderTokenBadge(entry.estimatedTokens, entry.rawEstimatedTokens)}${renderCbsWarningBadge(entry.unsupportedCbs)}${renderUnsupportedFeatureBadge(entry.unsupportedFeatures)}</div><div class="meta" data-lore-status>${loreSourceLabel(entry.source)} · ${entry.active ? "작가에게 포함" : "작가에게 미포함"}</div></div><div class="context-item-actions"><select data-change="lore-mode" data-lore-key="${escapeHtml(entry.key)}"><option value="auto" ${entry.mode === "auto" ? "selected" : ""}>AUTO</option><option value="on" ${entry.mode === "on" ? "selected" : ""}>ON</option><option value="off" ${entry.mode === "off" ? "selected" : ""}>OFF</option></select>${renderUnsupportedSyntaxToggle(loreUnsupportedSyntaxKey(entry.key))}</div></summary><p class="reason" data-lore-reason>${escapeHtml(entry.reason)}</p><div class="context-pre lore-content">${renderContextDisplay(entry.displayHtml, "내용 없음", entry.unsupportedCbs)}</div></details>`;
+    return `<details class="lore-card ${entry.active ? "active" : "inactive"}" data-lore-card="${escapeHtml(entry.key)}"><summary class="lore-card-summary"><div class="lore-summary-main"><div class="source-title"><strong>${escapeHtml(entry.name)}</strong>${localBadge}${renderTokenBadge(entry.estimatedTokens, entry.rawEstimatedTokens)}${renderCbsWarningBadge(entry.unsupportedCbs)}${renderUnsupportedFeatureBadge(entry.unsupportedFeatures)}</div><div class="meta" data-lore-status>${loreSourceLabel(entry.source)} · ${entry.active ? "작가에게 포함" : "작가에게 미포함"}</div></div><div class="context-item-actions"><select data-change="lore-mode" data-lore-key="${escapeHtml(entry.key)}"><option value="auto" ${entry.mode === "auto" ? "selected" : ""}>AUTO</option><option value="on" ${entry.mode === "on" ? "selected" : ""}>ON</option><option value="off" ${entry.mode === "off" ? "selected" : ""}>OFF</option></select><span class="control-divider" aria-hidden="true"></span>${renderUnsupportedSyntaxToggle(loreUnsupportedSyntaxKey(entry.key))}</div></summary><p class="reason" data-lore-reason>${escapeHtml(entry.reason)}</p><div class="context-pre lore-content">${renderContextDisplay(entry.displayHtml, "내용 없음", entry.unsupportedCbs)}</div></details>`;
 }
 
 function loreFolderMode(entries: LoreView[]): LoreMode | "mixed" {
@@ -2931,7 +2932,7 @@ function renderContextSourceBlock(
     fallback: string,
     extraControls = "",
 ): string {
-    return `<details class="context-block"><summary><span class="source-title">${escapeHtml(title)} ${renderTokenBadge(tokens, rawTokens)}${renderCbsWarningBadge(warnings)}</span><div class="context-item-actions">${extraControls}${renderContextToggle(key)}${renderUnsupportedSyntaxToggle(key)}</div></summary><div class="context-pre">${renderContextDisplay(displayHtml, fallback, warnings)}</div></details>`;
+    return `<details class="context-block"><summary><span class="source-title">${escapeHtml(title)} ${renderTokenBadge(tokens, rawTokens)}${renderCbsWarningBadge(warnings)}</span><div class="context-item-actions">${extraControls}${renderContextToggle(key)}<span class="control-divider" aria-hidden="true"></span>${renderUnsupportedSyntaxToggle(key)}</div></summary><div class="context-pre">${renderContextDisplay(displayHtml, fallback, warnings)}</div></details>`;
 }
 
 function renderContextTab(): string {
@@ -2943,8 +2944,9 @@ function renderContextTab(): string {
     const chatEntries = context.loreEntries.filter((entry) => entry.source === "chat");
     const moduleEntries = context.loreEntries.filter((entry) => entry.source === "module");
     const firstMessageControls = `<div class="fm-nav"><button data-action="prev-first-message" class="fm-arrow" aria-label="이전 퍼스트 메세지">‹</button><span class="fm-counter">${firstMessageIndex + 1}/${context.firstMessages.length}</span><button data-action="next-first-message" class="fm-arrow" aria-label="다음 퍼스트 메세지">›</button></div>`;
-    const bulkControls = `<div class="unsupported-bulk"><strong>미지원 문법 작가에게 전달 안 함</strong><div class="row"><button data-action="set-all-unsupported-syntax" data-checked="true">일괄 체크</button><button data-action="set-all-unsupported-syntax" data-checked="false">일괄 해제</button></div></div>`;
-    return `<section class="panel context-panel"><p class="context-note">이 화면의 설정은 플러그인의 작가에게 전달되는 내용입니다. 본 채팅에는 영향을 주지 않습니다.</p><div class="stats"><span>장기 기억 ${context.memories.length}개</span><span>본편 대화 ${context.chatMessageCount}개</span><span>로어 재귀 검색 ${context.recursiveLoreScanning ? "ON" : "OFF"}</span><span data-lore-count>작가용 로어 ${activeLoreCount}/${context.loreEntries.length}개</span><span data-reference-tokens>참고 자료 약 ${context.referenceTokens.toLocaleString()} 토큰</span></div>${bulkControls}${renderContextSourceBlock("botCard", "캐릭터 디스크립션", context.tokenEstimates.botCard, context.rawTokenEstimates.botCard, context.cbsWarnings.botCard, context.display.botCard, "캐릭터 이름 및 디스크립션 없음")}${renderContextSourceBlock("persona", "페르소나", context.tokenEstimates.persona, context.rawTokenEstimates.persona, context.cbsWarnings.persona, context.display.persona, "페르소나 없음")}${renderContextSourceBlock("memories", "하이파/수파 메모리 장기 기억", context.tokenEstimates.memories, context.rawTokenEstimates.memories, context.cbsWarnings.memories, context.display.memories, "하이파/수파 메모리 장기 기억 없음")}${renderContextSourceBlock("chatHistory", "이전 대화", context.tokenEstimates.chatHistory, context.rawTokenEstimates.chatHistory, context.cbsWarnings.chatHistory, context.display.chatHistory, "이전 대화 없음")}${renderContextSourceBlock("firstMessage", "퍼스트 메세지", context.tokenEstimates.firstMessage, context.rawTokenEstimates.firstMessage, context.cbsWarnings.firstMessage, context.display.firstMessages[firstMessageIndex] ?? context.display.firstMessages[0] ?? "", "퍼스트 메세지 없음", firstMessageControls)}${renderContextSourceBlock("authorNote", "작가의 노트", context.tokenEstimates.authorNote, context.rawTokenEstimates.authorNote, context.cbsWarnings.authorNote, context.display.authorNote, "작가의 노트 없음")}${renderContextSourceBlock("replaceGlobalNote", "글로벌 노트 덮어쓰기", context.tokenEstimates.replaceGlobalNote, context.rawTokenEstimates.replaceGlobalNote, context.cbsWarnings.replaceGlobalNote, context.display.replaceGlobalNote, "글로벌 노트 덮어쓰기 없음")}${renderLoreSection("캐릭터 로어북", "character", characterEntries)}${renderLoreSection("챗 로어북", "chat", chatEntries)}${renderLoreSection("모듈 로어북", "module", moduleEntries)}${renderContextSourceBlock("other", "기타", context.tokenEstimates.other, context.rawTokenEstimates.other, context.cbsWarnings.other, context.display.other, "기타 캐릭터 카드 정보 없음")}</section>`;
+    const bulkControls = `<div class="unsupported-bulk"><strong>미지원 문법 작가에게 전달 여부</strong><span class="control-divider" aria-hidden="true"></span><div class="row"><button data-action="set-all-unsupported-syntax" data-omit="true">전달 안 함</button><button data-action="set-all-unsupported-syntax" data-omit="false">전달함</button></div></div>`;
+    const otherBlock = `<div class="context-other-group"><div class="context-section-divider" aria-hidden="true"></div>${renderContextSourceBlock("other", "기타", context.tokenEstimates.other, context.rawTokenEstimates.other, context.cbsWarnings.other, context.display.other, "기타 캐릭터 카드 정보 없음")}</div>`;
+    return `<section class="panel context-panel"><p class="context-note">이 화면의 설정은 플러그인의 작가에게 전달되는 내용입니다. 본 채팅에는 영향을 주지 않습니다.</p><div class="stats"><span>장기 기억 ${context.memories.length}개</span><span>본편 대화 ${context.chatMessageCount}개</span><span>로어 재귀 검색 ${context.recursiveLoreScanning ? "ON" : "OFF"}</span><span data-lore-count>작가용 로어 ${activeLoreCount}/${context.loreEntries.length}개</span><span data-reference-tokens>참고 자료 약 ${context.referenceTokens.toLocaleString()} 토큰</span></div>${bulkControls}${renderContextSourceBlock("botCard", "캐릭터 디스크립션", context.tokenEstimates.botCard, context.rawTokenEstimates.botCard, context.cbsWarnings.botCard, context.display.botCard, "캐릭터 이름 및 디스크립션 없음")}${renderContextSourceBlock("persona", "페르소나", context.tokenEstimates.persona, context.rawTokenEstimates.persona, context.cbsWarnings.persona, context.display.persona, "페르소나 없음")}${renderContextSourceBlock("firstMessage", "퍼스트 메세지", context.tokenEstimates.firstMessage, context.rawTokenEstimates.firstMessage, context.cbsWarnings.firstMessage, context.display.firstMessages[firstMessageIndex] ?? context.display.firstMessages[0] ?? "", "퍼스트 메세지 없음", firstMessageControls)}${renderContextSourceBlock("chatHistory", "이전 대화", context.tokenEstimates.chatHistory, context.rawTokenEstimates.chatHistory, context.cbsWarnings.chatHistory, context.display.chatHistory, "이전 대화 없음")}${renderContextSourceBlock("authorNote", "작가의 노트", context.tokenEstimates.authorNote, context.rawTokenEstimates.authorNote, context.cbsWarnings.authorNote, context.display.authorNote, "작가의 노트 없음")}${renderContextSourceBlock("replaceGlobalNote", "글로벌 노트 덮어쓰기", context.tokenEstimates.replaceGlobalNote, context.rawTokenEstimates.replaceGlobalNote, context.cbsWarnings.replaceGlobalNote, context.display.replaceGlobalNote, "글로벌 노트 덮어쓰기 없음")}${renderLoreSection("캐릭터 로어북", "character", characterEntries)}${renderLoreSection("챗 로어북", "chat", chatEntries)}${renderLoreSection("모듈 로어북", "module", moduleEntries)}${renderContextSourceBlock("memories", "하이파/수파 메모리 장기 기억", context.tokenEstimates.memories, context.rawTokenEstimates.memories, context.cbsWarnings.memories, context.display.memories, "하이파/수파 메모리 장기 기억 없음")}${otherBlock}</section>`;
 }
 
 function renderPresetEditor(kind: PromptKind): string {
@@ -3143,19 +3145,19 @@ async function handleClick(event: MouseEvent): Promise<void> {
         }
         return;
     }
-    if (action === "toggle-unsupported-syntax") {
+    if (action === "set-unsupported-syntax") {
         const key = String(button.dataset.syntaxKey || "");
         if (!key) return;
-        settings.omitUnsupportedSyntax[key] = !omitsUnsupportedSyntax(key);
+        settings.omitUnsupportedSyntax[key] = button.dataset.omit === "true";
         await saveSettings();
         if (currentContext) currentContext = await buildWriterContext();
         renderPreservingPanelScroll();
         return;
     }
     if (action === "set-all-unsupported-syntax" && currentContext) {
-        const checked = button.dataset.checked === "true";
-        for (const key of CONTEXT_TOGGLE_KEYS) settings.omitUnsupportedSyntax[key] = checked;
-        for (const entry of currentContext.loreEntries) settings.omitUnsupportedSyntax[loreUnsupportedSyntaxKey(entry.key)] = checked;
+        const omit = button.dataset.omit === "true";
+        for (const key of CONTEXT_TOGGLE_KEYS) settings.omitUnsupportedSyntax[key] = omit;
+        for (const entry of currentContext.loreEntries) settings.omitUnsupportedSyntax[loreUnsupportedSyntaxKey(entry.key)] = omit;
         await saveSettings();
         currentContext = await buildWriterContext();
         renderPreservingPanelScroll();
@@ -3903,15 +3905,15 @@ function installStyles(): void {
         .app-nav button:hover:not(:disabled) { border:0; background:transparent; color:#dce0e5; }
         .app-nav button.selected { border:0; background:transparent; color:#f5f7f9; }
         .app-nav button.selected::after { content:""; position:absolute; right:2px; bottom:0; left:2px; height:3px; border-radius:3px 3px 0 0; background:var(--at-accent); box-shadow:0 0 14px rgba(49,130,246,.45); }
-        .status-wrap { flex:none; padding:10px 28px 0; }
-        .status { min-height:0; display:flex; align-items:center; gap:9px; margin:0; padding:8px 12px; border:1px solid #29436b; border-radius:9px; background:linear-gradient(90deg,rgba(24,57,97,.48),rgba(14,28,47,.75)); color:#9dccff; font-size:12px; line-height:1.35; }
-        .status .ui-icon { width:17px; height:17px; }
+        .status-wrap { flex:none; padding:8px 38px 0 28px; }
+        .status { min-height:38px; display:flex; align-items:center; gap:8px; margin:0; padding:7px 12px; border:1px solid #29436b; border-radius:9px; background:linear-gradient(90deg,rgba(24,57,97,.48),rgba(14,28,47,.75)); color:#9dccff; font-size:12px; line-height:1.35; }
+        .status .ui-icon { width:16px; height:16px; }
         .status.success { border-color:#2f5639; background:linear-gradient(90deg,rgba(25,70,39,.45),rgba(15,40,23,.72)); color:#9ce1a9; }
         .status.error { border-color:#74373d; background:linear-gradient(90deg,rgba(91,34,40,.48),rgba(48,20,24,.75)); color:#ffb0b6; }
         main { min-height:0; flex:1 1 auto; overflow:hidden; }
         .panel { height:100%; padding:22px 28px 48px; }
-        .context-panel { max-width:none; }
-        .context-note { min-height:0; display:flex; align-items:center; margin:0 0 14px; padding:8px 12px; border:1px solid #29466d; border-radius:9px; background:linear-gradient(90deg,rgba(25,57,96,.42),rgba(13,28,47,.62)); color:#a7cdf7; font-size:12px; line-height:1.35; }
+        .context-panel { max-width:none; padding-top:8px; }
+        .context-note { min-height:38px; display:flex; align-items:center; margin:0 0 12px; padding:7px 12px; border:1px solid #29466d; border-radius:9px; background:linear-gradient(90deg,rgba(25,57,96,.42),rgba(13,28,47,.62)); color:#a7cdf7; font-size:12px; line-height:1.35; }
         .stats { gap:9px; margin:0 0 22px; }
         .stats span { padding:9px 14px; border-color:var(--at-border); background:rgba(18,21,25,.78); color:#a7adb5; font-size:12px; font-weight:600; }
         .source-title { gap:9px; }
@@ -3920,24 +3922,26 @@ function installStyles(): void {
         .cbs-warning { border-color:#744317; background:#2b1a0e; color:#f0a04b; }
         .feature-warning { border-color:#743a57; background:#2a1620; color:#ee9fc2; }
         .context-block { margin:0 0 12px; padding:0; overflow:hidden; border-color:var(--at-border); border-radius:12px; background:linear-gradient(180deg,rgba(20,23,28,.9),rgba(16,19,23,.9)); }
-        .context-block > summary { min-height:78px; padding:18px 24px; list-style:none; }
+        .context-block > summary { min-height:78px; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:16px; padding:18px 24px; list-style:none; }
         .context-block > summary::-webkit-details-marker { display:none; }
-        .context-block > summary .source-title { color:#f0f2f5; font-size:18px; font-weight:700; letter-spacing:-.015em; }
+        .context-block > summary .source-title { min-width:0; color:#f0f2f5; font-size:18px; font-weight:700; letter-spacing:-.015em; word-break:keep-all; overflow-wrap:normal; }
         .context-block[open] > summary { border-bottom:1px solid var(--at-border); background:rgba(255,255,255,.012); }
         .context-block > .context-pre { padding:22px 24px 26px; background:#0d1014; color:#aab0b8; }
         .context-block > .lore-list { padding:18px; background:#0d1014; }
-        .context-item-actions { min-width:0; display:flex; align-items:center; justify-content:flex-end; flex:none; gap:10px; margin-left:auto; }
+        .context-item-actions { min-width:0; display:flex; align-items:center; justify-content:flex-end; flex:none; gap:9px; margin-left:auto; }
         .lore-summary-main { min-width:0; display:flex; flex:1; flex-direction:column; align-items:flex-start; gap:4px; }
-        .syntax-omit-toggle { min-height:28px; display:inline-flex; align-items:center; justify-content:flex-end; flex:none; gap:8px; padding:3px 0 3px 8px; border:0; background:transparent; color:#8f97a2; font-size:10px; font-weight:650; line-height:1.25; white-space:nowrap; }
-        .syntax-omit-toggle:hover:not(:disabled) { border:0; background:transparent; color:#c7ccd3; }
-        .syntax-omit-toggle:active:not(:disabled) { transform:none; }
-        .syntax-toggle-track { width:34px; height:18px; display:block; position:relative; flex:none; border-radius:999px; background:#353b44; box-shadow:inset 0 1px 3px rgba(0,0,0,.45); transition:background .15s ease; }
-        .syntax-toggle-thumb { width:14px; height:14px; position:absolute; top:2px; left:2px; border-radius:50%; background:#aeb4bc; box-shadow:0 1px 3px rgba(0,0,0,.55); transition:transform .15s ease,background .15s ease; }
-        .syntax-omit-toggle.on .syntax-toggle-track { background:var(--at-accent); }
-        .syntax-omit-toggle.on .syntax-toggle-thumb { transform:translateX(16px); background:white; }
+        .control-divider { width:1px; height:28px; display:block; flex:none; background:#343a43; }
+        .syntax-delivery-choice { display:flex; align-items:center; flex:none; gap:5px; }
+        .syntax-delivery-choice button { min-width:67px; padding:7px 9px; border-color:#343b44; border-radius:8px; background:#14181d; color:#949ba5; font-size:10px; font-weight:650; white-space:nowrap; }
+        .syntax-delivery-choice button:hover:not(:disabled) { border-color:#555e69; color:#d0d4da; }
+        .syntax-delivery-choice button.selected { border-color:var(--at-accent); background:rgba(49,130,246,.1); color:#8cbcff; box-shadow:inset 0 0 0 1px rgba(49,130,246,.22); }
         .unsupported-bulk { min-height:44px; display:flex; align-items:center; justify-content:space-between; gap:14px; margin:0 0 10px; padding:7px 10px 7px 14px; border:1px solid var(--at-border); border-radius:10px; background:#11151a; color:#aab1ba; font-size:11px; }
-        .unsupported-bulk strong { font-size:11px; font-weight:650; }
-        .unsupported-bulk button { padding:6px 10px; font-size:11px; }
+        .unsupported-bulk strong { flex:1; font-size:11px; font-weight:650; }
+        .unsupported-bulk button { min-width:67px; padding:6px 10px; font-size:11px; }
+        .unsupported-bulk .control-divider { height:26px; }
+        .context-section-divider { height:1px; margin:22px 4px 18px; background:linear-gradient(90deg,transparent,#444b55 12%,#444b55 88%,transparent); }
+        .context-other-group .context-block { border-color:#3b4149; background:linear-gradient(180deg,rgba(42,45,50,.92),rgba(31,34,38,.94)); }
+        .context-other-group .context-block[open] > summary { background:rgba(255,255,255,.022); }
         .slide-toggle-track { width:45px; height:25px; background:#343940; box-shadow:inset 0 1px 3px rgba(0,0,0,.45); }
         .slide-toggle-thumb { width:21px; height:21px; margin:2px; background:#a8adb3; box-shadow:0 1px 4px rgba(0,0,0,.6); }
         .slide-toggle.on .slide-toggle-track { background:var(--at-accent); }
@@ -3947,6 +3951,7 @@ function installStyles(): void {
         .context-block summary .lore-bulk-actions { gap:7px; }
         .context-block summary .lore-bulk-actions button { padding:7px 10px; border-color:#3b424c; background:#14181d; color:#aeb4bc; }
         .lore-card { margin-bottom:10px; padding:13px 15px; border-radius:10px; background:#14181e; }
+        .lore-card > summary.lore-card-summary { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:14px; }
         .lore-card.active { border-left:3px solid var(--at-accent); }
         .lore-card.inactive { border-left:3px solid #4a5058; opacity:.72; }
         .lore-card select, .lore-folder > summary select { width:104px; padding:8px; }
@@ -4001,13 +4006,15 @@ function installStyles(): void {
             .header-button span { display:none; }
             .app-nav { min-height:42px; gap:8px; padding:0 14px; }
             .app-nav button { min-width:78px; }
-            .status-wrap { padding:12px 14px 0; }
+            .status-wrap { padding:8px 24px 0 14px; }
             .panel { padding:16px 14px 40px; }
-            .context-block > summary { min-height:68px; padding:15px 16px; }
+            .context-panel { padding-top:8px; }
+            .context-block > summary { min-height:68px; grid-template-columns:minmax(0,1fr); align-items:start; padding:15px 16px; }
             .context-block > summary .source-title { font-size:15px; }
             .context-block > .context-pre { padding:17px 16px 21px; }
-            .context-item-actions { width:100%; flex-wrap:wrap; }
-            .syntax-omit-toggle { margin-left:auto; }
+            .context-item-actions { width:100%; margin-left:0; flex-wrap:wrap; }
+            .lore-card > summary.lore-card-summary { grid-template-columns:minmax(0,1fr); align-items:start; }
+            .lore-summary-main .source-title { word-break:keep-all; overflow-wrap:normal; }
         }
         @media (max-width:560px) {
             .app-header { gap:10px; }
@@ -4020,8 +4027,9 @@ function installStyles(): void {
             .app-nav button { min-width:70px; font-size:13px; }
             .room-toolbar button { padding:8px 10px; font-size:12px; }
             .context-block summary .lore-bulk-actions { width:100%; justify-content:flex-start; }
-            .unsupported-bulk { align-items:flex-start; flex-direction:column; }
-            .unsupported-bulk .row { width:100%; }
+            .unsupported-bulk { gap:8px; padding-left:10px; }
+            .unsupported-bulk strong { min-width:0; }
+            .unsupported-bulk button { min-width:60px; padding:6px 7px; }
         }
     `;
     document.head.appendChild(designStyle);
