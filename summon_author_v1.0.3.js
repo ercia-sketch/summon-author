@@ -1,10 +1,10 @@
 "use strict";
 //@name author_talk
-//@display-name ★작가 소환★ v1.0.2
+//@display-name ★작가 소환★ v1.0.3
 //@api 3.0
-//@version 1.0.2
+//@version 1.0.3
 const DEFAULT_LORE_MODE = "auto";
-const PLUGIN_VERSION = "1.0.2";
+const PLUGIN_VERSION = "1.0.3";
 const PLUGIN_DISPLAY_NAME = "★작가 소환★";
 const PLUGIN_PREFIX = "author_talk:";
 const SETTINGS_KEY = `${PLUGIN_PREFIX}settings:v1`;
@@ -2642,16 +2642,33 @@ async function readWriterResponse(raw, onText, request) {
     }
     throw new Error("Writer model returned an unsupported response format.");
 }
+function writerHistoryContent(message) {
+    if (!message.pendingActions?.length || (message.actionState !== "pending" && message.actionState !== "discarded")) {
+        return message.content;
+    }
+    const status = message.actionState === "pending"
+        ? "PENDING; not applied"
+        : "DISCARDED BY USER; not an active memo";
+    const actions = message.pendingActions.map((action) => {
+        if (action.operation === "create")
+            return `- Create memo: ${JSON.stringify(action.content ?? "")}`;
+        if (action.operation === "update")
+            return `- Update Memo(${action.id}): ${JSON.stringify(action.content ?? "")}`;
+        return `- Delete Memo(${action.id})`;
+    }).join("\n");
+    return `${message.content}\n\n[Memo proposal record — ${status}]\n${actions}`;
+}
 function writerRequestMessages(context, room, projectedDraft = "") {
     const base = selectedPreset("base");
     const additional = selectedPreset("additional");
     // The empty assistant placeholder used for streaming is UI state only. It must
     // never be sent to the Writer model as part of the conversation history.
     const history = room.writerMessages
-        .filter((message) => message.content.trim().length > 0);
+        .filter((message) => message.content.trim().length > 0)
+        .map((message) => ({ role: message.role, content: writerHistoryContent(message) }));
     const projected = projectedDraft.trim()
-        ? [...history.map((message) => ({ role: message.role, content: message.content })), { role: "user", content: applyWriterMarkdownCleanup(projectedDraft.trim()) }]
-        : history.map((message) => ({ role: message.role, content: message.content }));
+        ? [...history, { role: "user", content: applyWriterMarkdownCleanup(projectedDraft.trim()) }]
+        : history;
     return [
         { role: "system", content: base.content },
         { role: "system", content: additional.content },
