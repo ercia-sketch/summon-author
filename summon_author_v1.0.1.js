@@ -1,10 +1,10 @@
 "use strict";
 //@name author_talk
-//@display-name ★작가 소환★ v1.0.0
+//@display-name ★작가 소환★ v1.0.1
 //@api 3.0
-//@version 1.0.0
+//@version 1.0.1
 const DEFAULT_LORE_MODE = "auto";
-const PLUGIN_VERSION = "1.0.0";
+const PLUGIN_VERSION = "1.0.1";
 const PLUGIN_DISPLAY_NAME = "★작가 소환★";
 const PLUGIN_PREFIX = "author_talk:";
 const SETTINGS_KEY = `${PLUGIN_PREFIX}settings:v1`;
@@ -2865,7 +2865,7 @@ function renderWriterTab() {
             const controls = `<div class="row message-actions"><button data-action="edit-message" data-message-id="${escapeHtml(message.id)}" class="message-edit" ${isSending ? "disabled" : ""}>수정</button><button data-action="delete-message" data-message-id="${escapeHtml(message.id)}" class="message-edit danger" ${isSending ? "disabled" : ""}>삭제</button></div>`;
             return `<article class="message ${message.role}"><div class="row between"><div class="message-role">${message.role === "user" ? "사용자" : "작가"}</div>${controls}</div><div class="message-content ${settings.markdownEnabled ? "markdown" : "plain"}">${renderWriterMessageText(message.content || (isSending && message.id === activeWriterRequest?.assistantMessageId ? "생각하는 중…" : ""))}</div>${renderActionPreview(message)}</article>`;
         }).join("")
-        : `<div class="empty"><strong>집필 회의를 시작해 보세요.</strong><span>작가는 봇 카드, 페르소나, 장기 기억, 본편 대화와 작가용 로어북을 참고합니다.</span></div>`;
+        : `<div class="empty"><strong>집필 회의를 시작해 보세요.</strong><span>작가는 활성화된 작가 컨텍스트와 활성 메모를 참고합니다.</span></div>`;
     const roomOptions = (currentWorkspace?.rooms ?? []).map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === room?.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("");
     return `<section class="writer-layout"><div class="room-toolbar"><select data-change="room-select" aria-label="회의실 선택">${roomOptions}</select><label class="toolbar-toggle"><input type="checkbox" data-change="markdown-enabled" ${settings.markdownEnabled ? "checked" : ""}><span>마크다운 표시</span></label><button data-action="new-room">새 회의실</button><button data-action="rename-room" ${room ? "" : "disabled"}>이름 변경</button><button data-action="delete-room" class="danger" ${(currentWorkspace?.rooms.length ?? 0) <= 1 ? "disabled" : ""}>삭제</button></div><div id="writer-messages" class="messages">${messageHtml}</div><div class="composer"><textarea id="writer-input" placeholder="다음 장면, 인물의 동기, 복선 등을 작가와 논의하세요." ${isSending ? "disabled" : ""}>${escapeHtml(writerDraft)}</textarea><div class="composer-actions"><button data-action="toggle-token-info" class="${tokenCheckButtonClass()}" ${isRefreshingContext ? "disabled" : ""}>토큰 확인</button><button data-action="send-writer" class="primary send" ${isSending ? "disabled" : ""}>${isSending ? "응답 중" : "전송"}</button></div>${renderWriterTokenPanel()}</div></section>`;
 }
