@@ -1,7 +1,7 @@
 //@name author_talk
-//@display-name 작가와의 대화 v0.15.4
+//@display-name 작가와의 대화 v0.15.5
 //@api 3.0
-//@version 0.15.4
+//@version 0.15.5
 
 declare const Risuai: any;
 
@@ -10,7 +10,7 @@ type LoreMode = "on" | "off" | "auto";
 type PromptKind = "base" | "additional";
 type WriterModelMode = "model" | "submodel";
 const DEFAULT_LORE_MODE: LoreMode = "auto";
-const PLUGIN_VERSION = "0.15.4";
+const PLUGIN_VERSION = "0.15.5";
 
 interface PromptPreset {
     id: string;
@@ -2819,7 +2819,7 @@ function renderMemosTab(): string {
             return `<article class="memo-card ${effective ? "effective" : "suppressed"} ${collapsed ? "collapsed" : "expanded"}" data-memo-card="${uid}"><div class="memo-card-heading"><button data-action="toggle-memo" data-memo-uid="${uid}" class="collapse-heading memo-collapse-heading" aria-expanded="${collapsed ? "false" : "true"}"><span class="collapse-icon" aria-hidden="true">${collapsed ? "▸" : "▾"}</span><span><strong>${title}</strong><span class="meta">${effective ? "본편 요청에 포함" : "현재 미포함"}</span></span></button><label class="toggle"><input type="checkbox" data-change="memo-enabled" data-memo-uid="${uid}" ${memo.enabled ? "checked" : ""}> 메모 ON</label></div>${collapsed ? "" : `<div class="memo-expanded-body"><textarea data-input="memo-content" data-memo-uid="${uid}" class="memo-content-editor" placeholder="본편 모델에게 전달할 집필 지침">${escapeHtml(memo.content)}</textarea><div class="row memo-actions"><select data-change="memo-folder" data-memo-uid="${uid}" aria-label="메모 폴더">${folderOptions.replace(`value="${escapeHtml(folder.id)}"`, `value="${escapeHtml(folder.id)}" selected`)}</select><button data-action="save-memo" data-memo-uid="${uid}" class="primary">저장</button><button data-action="delete-memo" data-memo-uid="${uid}" class="danger">삭제</button></div></div>`}</article>`;
         }).join("") : !folderCollapsed ? `<div class="folder-empty">이 폴더에는 메모가 없습니다.</div>` : "";
         const folderId = escapeHtml(folder.id);
-        return `<section class="memo-folder ${folder.enabled ? "enabled" : "disabled"} ${folderCollapsed ? "collapsed" : "expanded"}" data-memo-folder="${folderId}"><div class="folder-heading"><button data-action="toggle-memo-folder" data-folder-id="${folderId}" class="collapse-heading folder-collapse-heading" aria-expanded="${folderCollapsed ? "false" : "true"}"><span class="collapse-icon" aria-hidden="true">${folderCollapsed ? "▸" : "▾"}</span><span><strong>${escapeHtml(folder.name)}</strong><span class="meta">${folder.enabled ? "폴더 ON" : "폴더 OFF · 내부 메모 모두 미포함"} · 메모 ${memos.length}개</span></span></button><div class="row folder-actions"><label class="toggle"><input type="checkbox" data-change="memo-folder-enabled" data-folder-id="${folderId}" ${folder.enabled ? "checked" : ""}> 폴더 ON</label><button data-action="new-memo" data-folder-id="${folderId}">메모 추가</button><button data-action="rename-memo-folder" data-folder-id="${folderId}">이름 변경</button><button data-action="delete-memo-folder" data-folder-id="${folderId}" class="danger" ${(workspace?.memoFolders.length ?? 0) <= 1 ? "disabled" : ""}>삭제</button></div></div>${folderCollapsed ? "" : `<div class="memo-list">${memoCards}</div>`}</section>`;
+        return `<section class="memo-folder ${folder.enabled ? "enabled" : "disabled"} ${folderCollapsed ? "collapsed" : "expanded"}" data-memo-folder="${folderId}"><div class="folder-heading"><button data-action="toggle-memo-folder" data-folder-id="${folderId}" class="collapse-heading folder-collapse-heading" aria-expanded="${folderCollapsed ? "false" : "true"}"><span class="collapse-icon" aria-hidden="true">${folderCollapsed ? "▸" : "▾"}</span><span><strong>${escapeHtml(folder.name)}</strong><span class="meta">${folder.enabled ? "폴더 ON" : "폴더 OFF"} · 메모 ${memos.length}개</span></span></button><div class="row folder-actions"><label class="toggle"><input type="checkbox" data-change="memo-folder-enabled" data-folder-id="${folderId}" ${folder.enabled ? "checked" : ""}> 폴더 ON</label><button data-action="new-memo" data-folder-id="${folderId}">메모 추가</button><button data-action="rename-memo-folder" data-folder-id="${folderId}">이름 변경</button><button data-action="delete-memo-folder" data-folder-id="${folderId}" class="danger" ${(workspace?.memoFolders.length ?? 0) <= 1 ? "disabled" : ""}>삭제</button></div></div>${folderCollapsed ? "" : `<div class="memo-list">${memoCards}</div>`}</section>`;
     }).join("");
     return `<section class="panel"><div class="section-heading"><button data-action="new-memo-folder" class="primary">새 폴더</button></div>${folders || `<div class="empty"><strong>메모 폴더가 없습니다.</strong></div>`}</section>`;
 }
@@ -3768,12 +3768,12 @@ function installStyles(): void {
         summary > .source-title { min-width:0; }
         pre { white-space:pre-wrap; overflow-wrap:anywhere; color:var(--at-muted); line-height:1.5; }
         .slide-toggle { flex:none; border:none; background:transparent; padding:0; cursor:pointer; }
-        .slide-toggle-track { display:block; width:36px; height:20px; border-radius:999px; background:var(--at-border); transition:background .15s ease; }
-        .slide-toggle-thumb { display:block; width:16px; height:16px; margin:2px; border-radius:50%; background:#d1d5db; transition:transform .15s ease, background .15s ease; }
-        .slide-toggle.on .slide-toggle-track { background:color-mix(in srgb, var(--at-success) 55%, transparent); }
-        .slide-toggle.on .slide-toggle-thumb { transform:translateX(16px); background:#fff; }
+        .slide-toggle-track { display:block; width:var(--at-toggle-width); height:var(--at-toggle-height); position:relative; border-radius:999px; background:var(--at-border); transition:background .15s ease; }
+        .slide-toggle-thumb { display:block; width:var(--at-toggle-thumb-size); height:var(--at-toggle-thumb-size); position:absolute; top:50%; left:var(--at-toggle-inset); margin:0; border-radius:50%; transform:translateY(-50%); background:#d1d5db; transition:left .15s ease,background .15s ease; }
+        .slide-toggle.on .slide-toggle-track { background:var(--at-accent); }
+        .slide-toggle.on .slide-toggle-thumb { left:calc(var(--at-toggle-width) - var(--at-toggle-thumb-size) - var(--at-toggle-inset)); transform:translateY(-50%); background:#fff; }
         .slide-toggle.off .slide-toggle-track { background:#3a4456; }
-        .slide-toggle.off .slide-toggle-thumb { transform:translateX(0); background:#7a8599; }
+        .slide-toggle.off .slide-toggle-thumb { left:var(--at-toggle-inset); transform:translateY(-50%); background:#7a8599; }
         .context-block summary .lore-bulk-actions { display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; flex:none; }
         .context-block summary .lore-bulk-actions button { padding:5px 9px; font-size:11px; white-space:nowrap; }
         .lore-card.active { border-left:4px solid var(--at-success); }
@@ -3861,6 +3861,10 @@ function installStyles(): void {
             --at-radius-lg:16px;
             --at-radius-md:12px;
             --at-shadow:0 24px 70px rgba(0,0,0,.46);
+            --at-toggle-width:45px;
+            --at-toggle-height:25px;
+            --at-toggle-thumb-size:21px;
+            --at-toggle-inset:2px;
         }
         html, body { background:transparent; color:var(--at-text); }
         body { overflow:hidden; }
@@ -3942,12 +3946,12 @@ function installStyles(): void {
         .context-section-divider { height:1px; margin:22px 4px 18px; background:linear-gradient(90deg,transparent,#444b55 12%,#444b55 88%,transparent); }
         .context-other-group .context-block { border-color:#3b4149; background:linear-gradient(180deg,rgba(42,45,50,.92),rgba(31,34,38,.94)); }
         .context-other-group .context-block[open] > summary { background:rgba(255,255,255,.022); }
-        .slide-toggle-track { width:45px; height:25px; position:relative; background:#343940; box-shadow:inset 0 1px 3px rgba(0,0,0,.45); }
-        .slide-toggle-thumb { width:21px; height:21px; position:absolute; top:50%; left:2px; margin:0; transform:translateY(-50%); background:#a8adb3; box-shadow:0 1px 4px rgba(0,0,0,.6); transition:left .15s ease,background .15s ease; }
+        .slide-toggle-track { width:var(--at-toggle-width); height:var(--at-toggle-height); position:relative; background:#343940; box-shadow:inset 0 1px 3px rgba(0,0,0,.45); }
+        .slide-toggle-thumb { width:var(--at-toggle-thumb-size); height:var(--at-toggle-thumb-size); position:absolute; top:50%; left:var(--at-toggle-inset); margin:0; transform:translateY(-50%); background:#b9bdc2; box-shadow:0 1px 4px rgba(0,0,0,.6); transition:left .15s ease,background .15s ease; }
         .slide-toggle.on .slide-toggle-track { background:var(--at-accent); }
-        .slide-toggle.on .slide-toggle-thumb { left:22px; transform:translateY(-50%); background:white; }
+        .slide-toggle.on .slide-toggle-thumb { left:calc(var(--at-toggle-width) - var(--at-toggle-thumb-size) - var(--at-toggle-inset)); transform:translateY(-50%); background:white; }
         .slide-toggle.off .slide-toggle-track { background:#343940; }
-        .slide-toggle.off .slide-toggle-thumb { left:2px; transform:translateY(-50%); background:#b9bdc2; }
+        .slide-toggle.off .slide-toggle-thumb { left:var(--at-toggle-inset); transform:translateY(-50%); background:#b9bdc2; }
         .context-block summary .lore-bulk-actions { gap:7px; }
         .context-block summary .lore-bulk-actions button { padding:7px 10px; border-color:#3b424c; background:#14181d; color:#aeb4bc; }
         .lore-card { margin-bottom:10px; padding:13px 15px; border-radius:10px; background:#14181e; }
@@ -3964,10 +3968,10 @@ function installStyles(): void {
         .room-toolbar { min-height:66px; gap:9px; padding:10px 18px; border-bottom-color:var(--at-border); background:rgba(14,17,21,.82); }
         .room-toolbar select { max-width:none; min-height:42px; }
         .toolbar-toggle { flex-direction:row-reverse; justify-content:flex-end; gap:9px; padding:0 6px; color:#b4bac2; }
-        .toolbar-toggle input[type="checkbox"], .toggle input[type="checkbox"] { width:38px; height:22px; position:relative; flex:none; appearance:none; border:0; border-radius:999px; background:#343a43; cursor:pointer; transition:background .15s ease; }
-        .toolbar-toggle input[type="checkbox"]::after, .toggle input[type="checkbox"]::after { content:""; position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:50%; background:#c3c7cc; box-shadow:0 1px 3px rgba(0,0,0,.55); transition:transform .15s ease,background .15s ease; }
+        .toolbar-toggle input[type="checkbox"], .toggle input[type="checkbox"] { width:var(--at-toggle-width); height:var(--at-toggle-height); position:relative; flex:none; appearance:none; padding:0; border:0; border-radius:999px; background:#343940; box-shadow:inset 0 1px 3px rgba(0,0,0,.45); cursor:pointer; transition:background .15s ease; }
+        .toolbar-toggle input[type="checkbox"]::after, .toggle input[type="checkbox"]::after { content:""; width:var(--at-toggle-thumb-size); height:var(--at-toggle-thumb-size); position:absolute; top:50%; left:var(--at-toggle-inset); border-radius:50%; transform:translateY(-50%); background:#b9bdc2; box-shadow:0 1px 4px rgba(0,0,0,.6); transition:left .15s ease,background .15s ease; }
         .toolbar-toggle input[type="checkbox"]:checked, .toggle input[type="checkbox"]:checked { background:var(--at-accent); }
-        .toolbar-toggle input[type="checkbox"]:checked::after, .toggle input[type="checkbox"]:checked::after { transform:translateX(16px); background:white; }
+        .toolbar-toggle input[type="checkbox"]:checked::after, .toggle input[type="checkbox"]:checked::after { left:calc(var(--at-toggle-width) - var(--at-toggle-thumb-size) - var(--at-toggle-inset)); transform:translateY(-50%); background:white; }
         .messages { padding:24px max(20px,calc((100vw - 920px)/2)); background:radial-gradient(circle at 50% 0,rgba(49,130,246,.035),transparent 38%); }
         .message { margin-bottom:16px; padding:17px 19px; border-color:var(--at-border); border-radius:14px; background:rgba(18,22,27,.94); box-shadow:0 8px 24px rgba(0,0,0,.12); }
         .message.user { border-color:#29466d; background:linear-gradient(135deg,rgba(23,45,75,.88),rgba(19,31,48,.92)); }
