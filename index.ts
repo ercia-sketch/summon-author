@@ -1,7 +1,7 @@
 //@name author_talk
-//@display-name ★작가 소환★ v1.0.4
+//@display-name ★작가 소환★ v1.0.5
 //@api 3.0
-//@version 1.0.4
+//@version 1.0.5
 
 declare const Risuai: any;
 
@@ -10,7 +10,7 @@ type LoreMode = "on" | "off" | "auto";
 type PromptKind = "base" | "additional";
 type WriterModelMode = "model" | "submodel";
 const DEFAULT_LORE_MODE: LoreMode = "auto";
-const PLUGIN_VERSION = "1.0.4";
+const PLUGIN_VERSION = "1.0.5";
 const PLUGIN_DISPLAY_NAME = "★작가 소환★";
 
 interface PromptPreset {
@@ -372,12 +372,18 @@ let mainResizeBridgeListeners: Array<{ type: string; id: string }> = [];
 let memoReceiptGeneration = 0;
 let memoReceiptObserver: any = null;
 let memoReceiptRepairTimer: number | undefined;
+let memoReceiptSyncPromise: Promise<void> = Promise.resolve();
+interface VisualMemoReceiptItem {
+    uid: string;
+    number: number;
+    content: string;
+}
 let memoReceiptState: {
     generation: number;
     characterId: string;
     chatId: string;
     userMessageIndex: number;
-    block: string;
+    memos: VisualMemoReceiptItem[];
 } | null = null;
 const parentResizeHandles = new Map<ResizeDirection, any>();
 let parentResizeLayer: any = null;
@@ -2343,64 +2349,96 @@ async function removeVisualMemoReceipts(): Promise<void> {
     }
 }
 
+function runMemoReceiptSync<T>(task: () => Promise<T>): Promise<T> {
+    const result = memoReceiptSyncPromise.catch(() => undefined).then(() => task());
+    memoReceiptSyncPromise = result.then(() => undefined, () => undefined);
+    return result;
+}
+
 async function clearMemoReceipt(): Promise<void> {
     memoReceiptGeneration++;
     memoReceiptState = null;
     if (memoReceiptRepairTimer !== undefined) window.clearTimeout(memoReceiptRepairTimer);
     memoReceiptRepairTimer = undefined;
-    await removeVisualMemoReceipts();
+    await runMemoReceiptSync(removeVisualMemoReceipts);
 }
 
-async function ensureMemoReceiptPresent(state = memoReceiptState): Promise<boolean> {
+async function reconcileMemoReceipts(state = memoReceiptState): Promise<boolean> {
     if (!state || state !== memoReceiptState || !mainDocument) return false;
     try {
         const messageElement = await mainDocument.querySelector(`.risu-chat[data-chat-index="${state.userMessageIndex}"]`);
         const contentElement = messageElement ? await messageElement.querySelector(":scope > div") : null;
         if (!contentElement) return false;
-        const existing = await contentElement.querySelector('[x-author-talk-memo-receipt="true"]');
-        if (existing) return true;
         const identity = await resolveSessionIdentity();
         if (!identity || identity.characterId !== state.characterId || identity.chatId !== state.chatId || state !== memoReceiptState) return false;
 
-        const receipt = await mainDocument.createElement("div");
-        await receipt.setAttribute("x-author-talk-memo-receipt", "true");
-        await applySafeStyles(receipt, [
-            ["maxWidth", "760px"], ["margin", "8px 0 2px auto"], ["padding", "9px 11px"],
-            ["border", "1px dashed rgba(121, 167, 255, .65)"], ["borderRadius", "9px"],
-            ["background", "rgba(30, 49, 80, .72)"], ["color", "inherit"], ["fontSize", "12px"],
-            ["lineHeight", "1.45"], ["boxSizing", "border-box"],
-        ]);
-        const label = await mainDocument.createElement("div");
-        await label.setTextContent("작가 메모 · 이번 모델 요청에만 포함됨");
-        await applySafeStyles(label, [["fontWeight", "700"], ["color", "#9fc0ff"], ["marginBottom", "5px"]]);
-        const content = await mainDocument.createElement("div");
-        await content.setTextContent(state.block);
-        await applySafeStyles(content, [["whiteSpace", "pre-wrap"], ["overflowWrap", "anywhere"], ["opacity", ".88"]]);
-        await receipt.appendChild(label);
-        await receipt.appendChild(content);
-        await contentElement.appendChild(receipt);
+        const expected = new Map(state.memos.map((memo) => [memo.uid, memo]));
+        const kept = new Set<string>();
+        const safeReceipts = await mainDocument.querySelectorAll('[x-author-talk-memo-receipt="true"]');
+        const receipts: any[] = await Risuai.unwarpSafeArray(safeReceipts);
+        for (const receipt of receipts) {
+            const generation = await receipt.getAttribute("x-author-talk-memo-generation");
+            const memoUid = await receipt.getAttribute("x-author-talk-memo-id");
+            if (generation !== String(state.generation) || !memoUid || !expected.has(memoUid) || kept.has(memoUid)) {
+                await receipt.remove();
+                continue;
+            }
+            kept.add(memoUid);
+        }
+
+        for (const memo of state.memos) {
+            if (state !== memoReceiptState) return false;
+            if (kept.has(memo.uid)) continue;
+            const receipt = await mainDocument.createElement("div");
+            await receipt.setAttribute("x-author-talk-memo-receipt", "true");
+            await receipt.setAttribute("x-author-talk-memo-generation", String(state.generation));
+            await receipt.setAttribute("x-author-talk-memo-id", memo.uid);
+            await applySafeStyles(receipt, [
+                ["maxWidth", "760px"], ["margin", "8px 0 2px auto"], ["padding", "9px 11px"],
+                ["border", "1px dashed rgba(121, 167, 255, .65)"], ["borderRadius", "9px"],
+                ["background", "rgba(30, 49, 80, .72)"], ["color", "inherit"], ["fontSize", "12px"],
+                ["lineHeight", "1.45"], ["boxSizing", "border-box"],
+            ]);
+            const label = await mainDocument.createElement("div");
+            await label.setTextContent(`작가 메모 Memo(${memo.number}) · 이번 모델 요청에만 포함됨`);
+            await applySafeStyles(label, [["fontWeight", "700"], ["color", "#9fc0ff"], ["marginBottom", "5px"]]);
+            const content = await mainDocument.createElement("div");
+            await content.setTextContent(memo.content);
+            await applySafeStyles(content, [["whiteSpace", "pre-wrap"], ["overflowWrap", "anywhere"], ["opacity", ".88"]]);
+            await receipt.appendChild(label);
+            await receipt.appendChild(content);
+            await contentElement.appendChild(receipt);
+            kept.add(memo.uid);
+        }
         return true;
     } catch (error) {
-        console.warn("[Summon Author] Could not display the visual memo receipt:", error);
+        console.warn("[Summon Author] Could not reconcile visual memo receipts:", error);
         return false;
     }
+}
+
+function ensureMemoReceiptsPresent(state = memoReceiptState): Promise<boolean> {
+    return runMemoReceiptSync(() => reconcileMemoReceipts(state));
 }
 
 function scheduleMemoReceiptRepair(): void {
     if (!memoReceiptState || memoReceiptRepairTimer !== undefined) return;
     memoReceiptRepairTimer = window.setTimeout(() => {
         memoReceiptRepairTimer = undefined;
-        void ensureMemoReceiptPresent();
+        void ensureMemoReceiptsPresent();
     }, 100);
 }
 
 async function ensureMemoReceiptObserver(): Promise<void> {
-    if (!mainDocument || memoReceiptObserver) return;
-    memoReceiptObserver = await Risuai.createMutationObserver(() => scheduleMemoReceiptRepair());
-    await memoReceiptObserver.observe(mainDocument, { childList: true, subtree: true });
+    if (!mainDocument || memoReceiptObserver || !memoReceiptState) return;
+    await runMemoReceiptSync(async () => {
+        if (!mainDocument || memoReceiptObserver || !memoReceiptState) return;
+        memoReceiptObserver = await Risuai.createMutationObserver(() => scheduleMemoReceiptRepair());
+        await memoReceiptObserver.observe(mainDocument, { childList: true, subtree: true });
+    });
 }
 
-async function displayMemoReceipt(identity: SessionIdentity, block: string): Promise<void> {
+async function displayMemoReceipts(identity: SessionIdentity, memos: VisualMemoReceiptItem[]): Promise<void> {
     // This is deliberately visual-only. It never calls a character/chat mutation API.
     try {
         if (!await ensureMainDocumentAccess()) return;
@@ -2422,12 +2460,12 @@ async function displayMemoReceipt(identity: SessionIdentity, block: string): Pro
         characterId: identity.characterId,
         chatId: identity.chatId,
         userMessageIndex,
-        block,
+        memos,
     };
     memoReceiptState = state;
     await ensureMemoReceiptObserver();
     for (let attempt = 0; attempt < 8 && state === memoReceiptState; attempt++) {
-        if (await ensureMemoReceiptPresent(state)) return;
+        if (await ensureMemoReceiptsPresent(state)) return;
         await new Promise<void>((resolve) => window.setTimeout(resolve, 80));
     }
 }
@@ -2439,8 +2477,10 @@ const memoReplacer = async (messages: any[], requestType: string): Promise<any[]
         if (!identity) return messages;
         await clearMemoReceipt();
         const workspace = await loadWorkspace();
-        const block = memoBlock(activeMemos(workspace));
+        const memos = activeMemos(workspace);
+        const block = memoBlock(memos);
         if (!block) return messages;
+        const receiptMemos = memos.map((memo, index) => ({ uid: memo.uid, number: index + 1, content: memo.content.trim() }));
         const cloned = safeClone(messages);
         for (let index = cloned.length - 1; index >= 0; index--) {
             const message = cloned[index];
@@ -2452,7 +2492,7 @@ const memoReplacer = async (messages: any[], requestType: string): Promise<any[]
                 console.warn("[Summon Author] Memo-triggered lorebook supplementation was skipped:", error);
             }
             if (!message.content.endsWith(block)) message.content = `${message.content}\n\n${block}`;
-            void displayMemoReceipt(identity, block);
+            void displayMemoReceipts(identity, receiptMemos);
             return cloned;
         }
         return messages;
@@ -3054,7 +3094,7 @@ function renderMemosTab(): string {
             const title = number ? `Memo(${number})` : memo.content.trim() ? "비활성 메모" : "새 메모";
             const uid = escapeHtml(memo.uid);
             const collapsed = isMemoCollapsed(memo.uid);
-            return `<article class="memo-card ${effective ? "effective" : "suppressed"} ${collapsed ? "collapsed" : "expanded"}" data-memo-card="${uid}"><div class="memo-card-heading"><button data-action="toggle-memo" data-memo-uid="${uid}" class="collapse-heading memo-collapse-heading" aria-expanded="${collapsed ? "false" : "true"}"><span class="collapse-icon" aria-hidden="true">${collapsed ? "▸" : "▾"}</span><span><strong>${title}</strong><span class="meta">${effective ? "본편 요청에 포함" : "현재 미포함"}</span></span></button><label class="toggle"><input type="checkbox" data-change="memo-enabled" data-memo-uid="${uid}" ${memo.enabled ? "checked" : ""}> 메모 ON</label></div>${collapsed ? "" : `<div class="memo-expanded-body"><textarea data-input="memo-content" data-memo-uid="${uid}" class="memo-content-editor" placeholder="본편 모델에게 전달할 집필 지침">${escapeHtml(memo.content)}</textarea><div class="row memo-actions"><select data-change="memo-folder" data-memo-uid="${uid}" aria-label="메모 폴더">${folderOptions.replace(`value="${escapeHtml(folder.id)}"`, `value="${escapeHtml(folder.id)}" selected`)}</select><button data-action="save-memo" data-memo-uid="${uid}" class="primary">저장</button><button data-action="delete-memo" data-memo-uid="${uid}" class="danger">삭제</button></div></div>`}</article>`;
+            return `<article class="memo-card ${effective ? "effective" : "suppressed"} ${collapsed ? "collapsed" : "expanded"}" data-memo-card="${uid}"><div class="memo-card-heading"><button data-action="toggle-memo" data-memo-uid="${uid}" class="collapse-heading memo-collapse-heading" aria-expanded="${collapsed ? "false" : "true"}"><span class="collapse-icon" aria-hidden="true">${collapsed ? "▸" : "▾"}</span><span><strong>${title}</strong><span class="meta">${effective ? "본편 요청에 포함" : "현재 미포함"}</span></span></button><div class="row memo-heading-actions"><label class="toggle"><input type="checkbox" data-change="memo-enabled" data-memo-uid="${uid}" ${memo.enabled ? "checked" : ""}> 메모 ON</label><button data-action="delete-memo" data-memo-uid="${uid}" class="danger">삭제</button></div></div>${collapsed ? "" : `<div class="memo-expanded-body"><textarea data-input="memo-content" data-memo-uid="${uid}" class="memo-content-editor" placeholder="본편 모델에게 전달할 집필 지침">${escapeHtml(memo.content)}</textarea><div class="row memo-actions"><select data-change="memo-folder" data-memo-uid="${uid}" aria-label="메모 폴더">${folderOptions.replace(`value="${escapeHtml(folder.id)}"`, `value="${escapeHtml(folder.id)}" selected`)}</select><button data-action="save-memo" data-memo-uid="${uid}" class="primary">저장</button></div></div>`}</article>`;
         }).join("") : !folderCollapsed ? `<div class="folder-empty">이 폴더에는 메모가 없습니다.</div>` : "";
         const folderId = escapeHtml(folder.id);
         return `<section class="memo-folder ${folder.enabled ? "enabled" : "disabled"} ${folderCollapsed ? "collapsed" : "expanded"}" data-memo-folder="${folderId}"><div class="folder-heading"><button data-action="toggle-memo-folder" data-folder-id="${folderId}" class="collapse-heading folder-collapse-heading" aria-expanded="${folderCollapsed ? "false" : "true"}"><span class="collapse-icon" aria-hidden="true">${folderCollapsed ? "▸" : "▾"}</span><span><strong>${escapeHtml(folder.name)}</strong><span class="meta">${folder.enabled ? "폴더 ON" : "폴더 OFF"} · 메모 ${memos.length}개</span></span></button><div class="row folder-actions"><label class="toggle"><input type="checkbox" data-change="memo-folder-enabled" data-folder-id="${folderId}" ${folder.enabled ? "checked" : ""}> 폴더 ON</label><button data-action="new-memo" data-folder-id="${folderId}">메모 추가</button><button data-action="rename-memo-folder" data-folder-id="${folderId}">이름 변경</button><button data-action="delete-memo-folder" data-folder-id="${folderId}" class="danger" ${(workspace?.memoFolders.length ?? 0) <= 1 ? "disabled" : ""}>삭제</button></div></div>${folderCollapsed ? "" : `<div class="memo-list">${memoCards}</div>`}</section>`;
@@ -3962,6 +4002,7 @@ function installStyles(): void {
         .memo-card.collapsed { padding-top:11px; padding-bottom:11px; }
         .memo-card.expanded { min-height:clamp(320px, calc(100vh - 180px), 1100px); display:flex; flex-direction:column; }
         .memo-card-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+        .memo-heading-actions { flex:none; flex-wrap:wrap; justify-content:flex-end; }
         .memo-collapse-heading { margin:-4px 0; }
         .memo-expanded-body { flex:1; min-height:0; display:flex; flex-direction:column; }
         .memo-content-editor { flex:1; min-height:240px; margin:14px 0 12px; padding:16px; border-color:var(--at-border); background:#111b2b; color:var(--at-muted); font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:13px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; resize:none; }
@@ -4036,7 +4077,8 @@ function installStyles(): void {
             .lore-folder-contents { margin-left:0; }
             .folder-heading { align-items:flex-start; flex-direction:column; }
             .folder-actions { width:100%; justify-content:flex-start; }
-            .memo-card-heading { align-items:flex-start; }
+            .memo-card-heading { align-items:stretch; flex-direction:column; }
+            .memo-heading-actions { width:100%; justify-content:flex-end; }
             .preset-editor > .row.between { align-items:flex-start; flex-direction:column; }
         }
     `;
@@ -4757,7 +4799,7 @@ async function initialize(): Promise<void> {
         memoReceiptObserver = null;
         const cleanupTasks: Promise<unknown>[] = [
             finishPanelResize(),
-            removeVisualMemoReceipts(),
+            runMemoReceiptSync(removeVisualMemoReceipts),
             removeParentResizeHandles(),
             removeMainResizeBridge(),
         ];
