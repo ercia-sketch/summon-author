@@ -1,9 +1,9 @@
 //@name author_talk
-//@display-name ★작가 소환★ v1.1.0
+//@display-name ★작가 소환★ v1.1.1
 //@api 3.0
-//@version 1.1.0
+//@version 1.1.1
 const DEFAULT_LORE_MODE = "auto";
-const PLUGIN_VERSION = "1.1.0";
+const PLUGIN_VERSION = "1.1.1";
 const PLUGIN_DISPLAY_NAME = "★작가 소환★";
 const PLUGIN_PREFIX = "author_talk:";
 const SETTINGS_KEY = `${PLUGIN_PREFIX}settings:v1`;
@@ -76,13 +76,16 @@ let memoReplacerReady = false;
 let memoReplacerPermissionDenied = false;
 let mainDomPermissionDenied = false;
 let settingsSaveTimer;
+let workspaceSaveTimer;
+let workspaceSavePromise = Promise.resolve();
 let regexContextRefreshTimer;
 let regexContextRefreshGeneration = 0;
 let regexManagerOpen = false;
 const expandedRegexScriptIds = new Set();
 const collapsedChatMessageKeys = new Set();
 const contextRegexErrors = new Map();
-let draggedRegexScriptId = null;
+let activeReorderDrag = null;
+let activeReorderTarget = null;
 let root;
 let editingMessageId = null;
 let editingMessageDraft = "";
@@ -483,7 +486,13 @@ function normalizeWriterMessage(value, memoFolderId) {
                 return null;
             if ((change.before !== null && before === null) || (change.after !== null && after === null))
                 return null;
-            return { uid: change.uid, before, after };
+            return {
+                uid: change.uid,
+                before,
+                after,
+                beforeIndex: Number.isInteger(change.beforeIndex) && change.beforeIndex >= 0 ? change.beforeIndex : undefined,
+                afterIndex: Number.isInteger(change.afterIndex) && change.afterIndex >= 0 ? change.afterIndex : undefined,
+            };
         }).filter((change) => change !== null)
         : null;
     const undoFolderValue = value.actionUndo?.createdFolder;
@@ -565,7 +574,6 @@ function normalizeWorkspace(value) {
             enabled: memo.enabled !== false,
             createdAt: typeof memo.createdAt === "number" ? memo.createdAt : Date.now() + index,
         }))
-            .sort((a, b) => a.createdAt - b.createdAt || a.uid.localeCompare(b.uid))
         : [];
     return {
         version: 4,
@@ -770,10 +778,20 @@ async function saveSettings() {
     await writeStoredJson(SETTINGS_KEY, settings);
 }
 async function saveCurrentWorkspace() {
-    if (currentWorkspace)
-        await writeStoredJson(GLOBAL_WORKSPACE_KEY, currentWorkspace);
-    if (currentIdentity)
-        await writeStoredJson(loreOverridesStorageKey(currentIdentity.characterId), currentLoreOverrides);
+    if (workspaceSaveTimer !== undefined)
+        window.clearTimeout(workspaceSaveTimer);
+    workspaceSaveTimer = undefined;
+    const workspaceSnapshot = currentWorkspace ? safeClone(currentWorkspace) : null;
+    const loreKey = currentIdentity ? loreOverridesStorageKey(currentIdentity.characterId) : "";
+    const loreSnapshot = currentIdentity ? safeClone(currentLoreOverrides) : null;
+    const save = workspaceSavePromise.catch(() => undefined).then(async () => {
+        if (workspaceSnapshot)
+            await writeStoredJson(GLOBAL_WORKSPACE_KEY, workspaceSnapshot);
+        if (loreKey && loreSnapshot)
+            await writeStoredJson(loreKey, loreSnapshot);
+    });
+    workspaceSavePromise = save.then(() => undefined, () => undefined);
+    return save;
 }
 function scheduleSettingsSave() {
     if (settingsSaveTimer !== undefined)
@@ -781,6 +799,23 @@ function scheduleSettingsSave() {
     settingsSaveTimer = window.setTimeout(() => {
         void saveSettings().catch((error) => setStatus(`설정 저장 실패: ${errorMessage(error)}`, "error"));
     }, 250);
+}
+function scheduleWorkspaceSave() {
+    if (workspaceSaveTimer !== undefined)
+        window.clearTimeout(workspaceSaveTimer);
+    workspaceSaveTimer = window.setTimeout(() => {
+        workspaceSaveTimer = undefined;
+        void saveCurrentWorkspace().catch((error) => setStatus(`메모 자동 저장 실패: ${errorMessage(error)}`, "error"));
+    }, 300);
+}
+async function flushScheduledWorkspaceSave() {
+    if (workspaceSaveTimer !== undefined) {
+        window.clearTimeout(workspaceSaveTimer);
+        workspaceSaveTimer = undefined;
+        await saveCurrentWorkspace();
+        return;
+    }
+    await workspaceSavePromise;
 }
 function scheduleRegexContextRefresh() {
     if (regexContextRefreshTimer !== undefined)
@@ -872,11 +907,68 @@ function isMemoEffectivelyEnabled(memo, workspace = currentWorkspace) {
     const folder = getMemoFolder(memo.folderId, workspace);
     return Boolean(workspace && folder?.enabled && memo.enabled && memo.content.trim());
 }
+function orderedMemos(workspace) {
+    const ordered = [];
+    const included = new Set();
+    for (const folder of workspace.memoFolders) {
+        for (const memo of workspace.memos) {
+            if (memo.folderId !== folder.id)
+                continue;
+            ordered.push(memo);
+            included.add(memo.uid);
+        }
+    }
+    for (const memo of workspace.memos) {
+        if (!included.has(memo.uid))
+            ordered.push(memo);
+    }
+    return ordered;
+}
+function reorderListItem(items, movedId, targetId, insertAfter, getId) {
+    const from = items.findIndex((item) => getId(item) === movedId);
+    const target = items.findIndex((item) => getId(item) === targetId);
+    if (from < 0 || target < 0 || from === target)
+        return false;
+    const before = items.map(getId).join("\u0000");
+    const [moved] = items.splice(from, 1);
+    const adjustedTarget = items.findIndex((item) => getId(item) === targetId);
+    items.splice(adjustedTarget + (insertAfter ? 1 : 0), 0, moved);
+    return before !== items.map(getId).join("\u0000");
+}
+function reorderMemoWithinFolder(workspace, folderId, movedUid, targetUid, insertAfter) {
+    const indexes = [];
+    const scoped = [];
+    workspace.memos.forEach((memo, index) => {
+        if (memo.folderId !== folderId)
+            return;
+        indexes.push(index);
+        scoped.push(memo);
+    });
+    if (!reorderListItem(scoped, movedUid, targetUid, insertAfter, (memo) => memo.uid))
+        return false;
+    indexes.forEach((workspaceIndex, index) => {
+        workspace.memos[workspaceIndex] = scoped[index];
+    });
+    return true;
+}
+function moveMemosToFolderEnd(workspace, memoUids, folderId) {
+    const movingIds = new Set(memoUids);
+    const moving = workspace.memos.filter((memo) => movingIds.has(memo.uid));
+    if (moving.length === 0)
+        return;
+    workspace.memos = workspace.memos.filter((memo) => !movingIds.has(memo.uid));
+    for (const memo of moving)
+        memo.folderId = folderId;
+    let insertAt = -1;
+    for (let index = 0; index < workspace.memos.length; index++) {
+        if (workspace.memos[index].folderId === folderId)
+            insertAt = index;
+    }
+    workspace.memos.splice(insertAt + 1, 0, ...moving);
+}
 function activeMemos(workspace = currentWorkspace) {
     return workspace
-        ? workspace.memos
-            .filter((memo) => isMemoEffectivelyEnabled(memo, workspace))
-            .sort((a, b) => a.createdAt - b.createdAt || a.uid.localeCompare(b.uid))
+        ? orderedMemos(workspace).filter((memo) => isMemoEffectivelyEnabled(memo, workspace))
         : [];
 }
 function activeMemoNumberMap(workspace = currentWorkspace) {
@@ -2693,11 +2785,15 @@ function memoFolderEquals(left, right) {
 function memoUndoChanges(before, after) {
     const beforeByUid = new Map(before.map((memo) => [memo.uid, memo]));
     const afterByUid = new Map(after.map((memo) => [memo.uid, memo]));
+    const beforeIndexByUid = new Map(before.map((memo, index) => [memo.uid, index]));
+    const afterIndexByUid = new Map(after.map((memo, index) => [memo.uid, index]));
     const uids = new Set([...beforeByUid.keys(), ...afterByUid.keys()]);
     return [...uids].filter((uid) => !memoEquals(beforeByUid.get(uid), afterByUid.get(uid))).map((uid) => ({
         uid,
         before: beforeByUid.has(uid) ? safeClone(beforeByUid.get(uid)) : null,
         after: afterByUid.has(uid) ? safeClone(afterByUid.get(uid)) : null,
+        beforeIndex: beforeIndexByUid.get(uid),
+        afterIndex: afterIndexByUid.get(uid),
     }));
 }
 async function applyMemoActions(messageId) {
@@ -2745,7 +2841,7 @@ async function applyMemoActions(messageId) {
             throw new Error("실제로 변경되는 메모가 없습니다.");
         message.actionUndo = { changes, createdFolder };
         currentWorkspace.memoFolders = nextFolders;
-        currentWorkspace.memos = nextMemos.sort((a, b) => a.createdAt - b.createdAt || a.uid.localeCompare(b.uid));
+        currentWorkspace.memos = nextMemos;
         message.actionState = "applied";
         try {
             await saveCurrentWorkspace();
@@ -2797,7 +2893,11 @@ async function undoMemoActions(messageId) {
                 nextMemos[index] = safeClone(change.before);
             }
             else {
-                nextMemos.push(safeClone(change.before));
+                const fallbackIndex = nextMemos.findIndex((memo) => memo.createdAt > change.before.createdAt);
+                const insertAt = change.beforeIndex === undefined
+                    ? fallbackIndex < 0 ? nextMemos.length : fallbackIndex
+                    : Math.min(change.beforeIndex, nextMemos.length);
+                nextMemos.splice(insertAt, 0, safeClone(change.before));
             }
         }
         const nextFolders = safeClone(currentWorkspace.memoFolders);
@@ -2808,7 +2908,7 @@ async function undoMemoActions(messageId) {
                 nextFolders.splice(folderIndex, 1);
         }
         currentWorkspace.memoFolders = nextFolders;
-        currentWorkspace.memos = nextMemos.sort((a, b) => a.createdAt - b.createdAt || a.uid.localeCompare(b.uid));
+        currentWorkspace.memos = nextMemos;
         message.actionState = "undone";
         try {
             await saveCurrentWorkspace();
@@ -3216,6 +3316,9 @@ function forgetMemoUiState(folderIds = [], memoIds = []) {
     if (memoIds.length > 0)
         settings.collapsedMemoIds = settings.collapsedMemoIds.filter((id) => !memoIds.includes(id));
 }
+function reorderGripIcon() {
+    return `<svg class="reorder-grip" viewBox="0 0 16 24" aria-hidden="true"><circle cx="5" cy="5" r="1.5"/><circle cx="11" cy="5" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="11" cy="12" r="1.5"/><circle cx="5" cy="19" r="1.5"/><circle cx="11" cy="19" r="1.5"/></svg>`;
+}
 function renderMemosTab() {
     const workspace = currentWorkspace;
     const folderOptions = (workspace?.memoFolders ?? []).map((folder) => `<option value="${escapeHtml(folder.id)}">${escapeHtml(folder.name)}</option>`).join("");
@@ -3228,12 +3331,12 @@ function renderMemosTab() {
             const title = number ? `Memo(${number})` : memo.content.trim() ? "비활성 메모" : "새 메모";
             const uid = escapeHtml(memo.uid);
             const collapsed = isMemoCollapsed(memo.uid);
-            return `<article class="memo-card ${effective ? "effective" : "suppressed"} ${collapsed ? "collapsed" : "expanded"}" data-memo-card="${uid}"><div class="memo-card-heading"><button data-action="toggle-memo" data-memo-uid="${uid}" class="collapse-heading memo-collapse-heading" aria-expanded="${collapsed ? "false" : "true"}"><span class="collapse-icon" aria-hidden="true">${collapsed ? "▸" : "▾"}</span><span><strong>${title}</strong><span class="meta">${effective ? "본편 요청에 포함" : "현재 미포함"}</span></span></button><div class="row memo-heading-actions"><label class="toggle"><input type="checkbox" data-change="memo-enabled" data-memo-uid="${uid}" ${memo.enabled ? "checked" : ""}> 메모 ON</label><button data-action="delete-memo" data-memo-uid="${uid}" class="danger">삭제</button></div></div>${collapsed ? "" : `<div class="memo-expanded-body"><textarea data-input="memo-content" data-memo-uid="${uid}" class="memo-content-editor" placeholder="본편 모델에게 전달할 집필 지침">${escapeHtml(memo.content)}</textarea><div class="row memo-actions"><select data-change="memo-folder" data-memo-uid="${uid}" aria-label="메모 폴더">${folderOptions.replace(`value="${escapeHtml(folder.id)}"`, `value="${escapeHtml(folder.id)}" selected`)}</select><button data-action="save-memo" data-memo-uid="${uid}" class="primary">저장</button></div></div>`}</article>`;
+            return `<article class="memo-card ${effective ? "effective" : "suppressed"} ${collapsed ? "collapsed" : "expanded"}" data-memo-card="${uid}" data-reorder-card="memo" data-reorder-id="${uid}" data-reorder-scope="${escapeHtml(folder.id)}"><div class="reorder-handle-column" draggable="true" data-reorder-kind="memo" data-reorder-id="${uid}" data-reorder-scope="${escapeHtml(folder.id)}" title="같은 폴더 안에서 메모 순서 변경" aria-label="같은 폴더 안에서 메모 순서 변경">${reorderGripIcon()}</div><div class="reorder-card-content memo-card-content"><div class="memo-card-heading"><button data-action="toggle-memo" data-memo-uid="${uid}" class="collapse-heading memo-collapse-heading" aria-expanded="${collapsed ? "false" : "true"}"><span class="collapse-icon" aria-hidden="true">${collapsed ? "▸" : "▾"}</span><span><strong>${title}</strong><span class="meta">${effective ? "본편 요청에 포함" : "현재 미포함"}</span></span></button><div class="row memo-heading-actions"><label class="toggle"><input type="checkbox" data-change="memo-enabled" data-memo-uid="${uid}" ${memo.enabled ? "checked" : ""}> 메모 ON</label><button data-action="delete-memo" data-memo-uid="${uid}" class="danger">삭제</button></div></div>${collapsed ? "" : `<div class="memo-expanded-body"><textarea data-input="memo-content" data-memo-uid="${uid}" class="memo-content-editor" placeholder="본편 모델에게 전달할 집필 지침">${escapeHtml(memo.content)}</textarea><div class="row memo-actions"><select data-change="memo-folder" data-memo-uid="${uid}" aria-label="메모 폴더">${folderOptions.replace(`value="${escapeHtml(folder.id)}"`, `value="${escapeHtml(folder.id)}" selected`)}</select></div></div>`}</div></article>`;
         }).join("") : !folderCollapsed ? `<div class="folder-empty">이 폴더에는 메모가 없습니다.</div>` : "";
         const folderId = escapeHtml(folder.id);
-        return `<section class="memo-folder ${folder.enabled ? "enabled" : "disabled"} ${folderCollapsed ? "collapsed" : "expanded"}" data-memo-folder="${folderId}"><div class="folder-heading"><button data-action="toggle-memo-folder" data-folder-id="${folderId}" class="collapse-heading folder-collapse-heading" aria-expanded="${folderCollapsed ? "false" : "true"}"><span class="collapse-icon" aria-hidden="true">${folderCollapsed ? "▸" : "▾"}</span><span><strong>${escapeHtml(folder.name)}</strong><span class="meta">${folder.enabled ? "폴더 ON" : "폴더 OFF"} · 메모 ${memos.length}개</span></span></button><div class="row folder-actions"><label class="toggle"><input type="checkbox" data-change="memo-folder-enabled" data-folder-id="${folderId}" ${folder.enabled ? "checked" : ""}> 폴더 ON</label><button data-action="new-memo" data-folder-id="${folderId}">메모 추가</button><button data-action="rename-memo-folder" data-folder-id="${folderId}">이름 변경</button><button data-action="delete-memo-folder" data-folder-id="${folderId}" class="danger" ${(workspace?.memoFolders.length ?? 0) <= 1 ? "disabled" : ""}>삭제</button></div></div>${folderCollapsed ? "" : `<div class="memo-list">${memoCards}</div>`}</section>`;
+        return `<section class="memo-folder ${folder.enabled ? "enabled" : "disabled"} ${folderCollapsed ? "collapsed" : "expanded"}" data-memo-folder="${folderId}" data-reorder-card="memo-folder" data-reorder-id="${folderId}" data-reorder-scope="workspace"><div class="reorder-handle-column folder-reorder-handle" draggable="true" data-reorder-kind="memo-folder" data-reorder-id="${folderId}" data-reorder-scope="workspace" title="메모 폴더 순서 변경" aria-label="메모 폴더 순서 변경">${reorderGripIcon()}</div><div class="reorder-card-content memo-folder-content"><div class="folder-heading"><button data-action="toggle-memo-folder" data-folder-id="${folderId}" class="collapse-heading folder-collapse-heading" aria-expanded="${folderCollapsed ? "false" : "true"}"><span class="collapse-icon" aria-hidden="true">${folderCollapsed ? "▸" : "▾"}</span><span><strong>${escapeHtml(folder.name)}</strong><span class="meta">${folder.enabled ? "폴더 ON" : "폴더 OFF"} · 메모 ${memos.length}개</span></span></button><div class="row folder-actions"><label class="toggle"><input type="checkbox" data-change="memo-folder-enabled" data-folder-id="${folderId}" ${folder.enabled ? "checked" : ""}> 폴더 ON</label><button data-action="new-memo" data-folder-id="${folderId}">메모 추가</button><button data-action="rename-memo-folder" data-folder-id="${folderId}">이름 변경</button><button data-action="delete-memo-folder" data-folder-id="${folderId}" class="danger" ${(workspace?.memoFolders.length ?? 0) <= 1 ? "disabled" : ""}>삭제</button></div></div>${folderCollapsed ? "" : `<div class="memo-list" data-reorder-list="memo" data-reorder-scope="${folderId}">${memoCards}</div>`}</div></section>`;
     }).join("");
-    return `<section class="panel"><div class="section-heading"><button data-action="new-memo-folder" class="primary">새 폴더</button></div>${folders || `<div class="empty"><strong>메모 폴더가 없습니다.</strong></div>`}</section>`;
+    return `<section class="panel"><div class="section-heading"><button data-action="new-memo-folder" class="primary">새 폴더</button></div><div class="memo-folder-list" data-reorder-list="memo-folder" data-reorder-scope="workspace">${folders || `<div class="empty"><strong>메모 폴더가 없습니다.</strong></div>`}</div></section>`;
 }
 function loreSourceLabel(source) {
     return source === "character" ? "캐릭터" : source === "chat" ? "현재 채팅" : "활성 모듈";
@@ -3344,18 +3447,36 @@ function renderRegexManager() {
     const cards = settings.contextRegexScripts.map((script) => {
         const expanded = expandedRegexScriptIds.has(script.id);
         const error = contextRegexErrors.get(script.id) ?? "";
-        return `<article class="regex-script-card ${expanded ? "expanded" : "collapsed"}" data-regex-id="${escapeHtml(script.id)}"><div class="regex-script-heading"><span class="regex-drag-handle" draggable="true" title="드래그하여 적용 순서 변경" aria-label="드래그하여 적용 순서 변경">⋮⋮</span><button data-action="toggle-regex-script" data-regex-id="${escapeHtml(script.id)}" class="regex-script-title" aria-expanded="${expanded}"><span aria-hidden="true">${expanded ? "▾" : "▸"}</span><strong>${escapeHtml(script.name.trim() || "이름 없는 정규식")}</strong></button><button data-action="delete-regex-script" data-regex-id="${escapeHtml(script.id)}" class="danger">삭제</button></div>${expanded ? `<div class="regex-script-body"><label>이름<input data-input="regex-name" data-regex-id="${escapeHtml(script.id)}" value="${escapeHtml(script.name)}"></label><label>IN:<textarea data-input="regex-input" data-regex-id="${escapeHtml(script.id)}" class="regex-expression" spellcheck="false">${escapeHtml(script.input)}</textarea></label><label>OUT:<textarea data-input="regex-output" data-regex-id="${escapeHtml(script.id)}" class="regex-expression" spellcheck="false" placeholder="비워두면 일치한 텍스트를 컨텍스트에서 제거합니다.">${escapeHtml(script.output)}</textarea></label><p class="regex-flag">적용 플래그: <code>g</code></p><p class="regex-error" data-regex-error="${escapeHtml(script.id)}" ${error ? "" : "hidden"}>${escapeHtml(error)}</p></div>` : ""}</article>`;
+        const id = escapeHtml(script.id);
+        return `<article class="regex-script-card ${expanded ? "expanded" : "collapsed"}" data-regex-id="${id}" data-reorder-card="regex" data-reorder-id="${id}" data-reorder-scope="settings"><div class="reorder-handle-column" draggable="true" data-reorder-kind="regex" data-reorder-id="${id}" data-reorder-scope="settings" title="드래그하여 적용 순서 변경" aria-label="드래그하여 적용 순서 변경">${reorderGripIcon()}</div><div class="reorder-card-content regex-script-content"><div class="regex-script-heading"><button data-action="toggle-regex-script" data-regex-id="${id}" class="regex-script-title" aria-expanded="${expanded}"><span aria-hidden="true">${expanded ? "▾" : "▸"}</span><strong>${escapeHtml(script.name.trim() || "이름 없는 정규식")}</strong></button><button data-action="delete-regex-script" data-regex-id="${id}" class="danger">삭제</button></div>${expanded ? `<div class="regex-script-body"><label>이름<input data-input="regex-name" data-regex-id="${id}" value="${escapeHtml(script.name)}"></label><label>IN:<textarea data-input="regex-input" data-regex-id="${id}" class="regex-expression" spellcheck="false">${escapeHtml(script.input)}</textarea></label><label>OUT:<textarea data-input="regex-output" data-regex-id="${id}" class="regex-expression" spellcheck="false" placeholder="비워두면 일치한 텍스트를 컨텍스트에서 제거합니다.">${escapeHtml(script.output)}</textarea></label><p class="regex-flag">적용 플래그: <code>g</code></p><p class="regex-error" data-regex-error="${id}" ${error ? "" : "hidden"}>${escapeHtml(error)}</p></div>` : ""}</div></article>`;
     }).join("");
-    return `<section class="regex-manager ${regexManagerOpen ? "open" : "closed"}"><div class="regex-manager-heading"><button data-action="toggle-regex-manager" class="regex-manager-title" aria-expanded="${regexManagerOpen}"><span aria-hidden="true">${regexManagerOpen ? "▾" : "▸"}</span><strong>정규식 스크립트</strong><span class="meta">${settings.contextRegexScripts.length}개</span></button><button data-action="new-regex-script">새 정규식</button></div>${regexManagerOpen ? `<p class="regex-help">위에서 아래 순서로 컨텍스트 전체에 적용됩니다. 각 규칙은 항상 <code>g</code> 플래그를 사용합니다.</p><div class="regex-script-list">${cards || `<div class="folder-empty">등록된 정규식이 없습니다.</div>`}</div>` : ""}</section>`;
+    return `<section class="regex-manager ${regexManagerOpen ? "open" : "closed"}"><div class="regex-manager-heading"><button data-action="toggle-regex-manager" class="regex-manager-title" aria-expanded="${regexManagerOpen}"><span aria-hidden="true">${regexManagerOpen ? "▾" : "▸"}</span><strong>정규식 스크립트</strong><span class="meta">${settings.contextRegexScripts.length}개</span></button><button data-action="new-regex-script">새 정규식</button></div>${regexManagerOpen ? `<p class="regex-help">위에서 아래 순서로 컨텍스트 전체에 적용됩니다. 각 규칙은 항상 <code>g</code> 플래그를 사용합니다.</p><div class="regex-script-list" data-reorder-list="regex" data-reorder-scope="settings">${cards || `<div class="folder-empty">등록된 정규식이 없습니다.</div>`}</div>` : ""}</section>`;
 }
 function renderSettingsTab() {
     validateContextRegexScripts();
     return `<section class="panel"><div class="settings-grid"><label>작가 모델<select data-change="model-mode"><option value="submodel" ${settings.writerModelMode === "submodel" ? "selected" : ""}>Sub model</option><option value="model" ${settings.writerModelMode === "model" ? "selected" : ""}>Main model</option></select></label><label>집필 회의 마크다운 정리<select data-change="markdown-cleanup"><option value="off" ${!settings.writerMarkdownCleanup ? "selected" : ""}>사용 안 함</option><option value="on" ${settings.writerMarkdownCleanup ? "selected" : ""}>사용</option></select></label></div>${renderRegexManager()}${renderPresetEditor("base")}${renderPresetEditor("additional")}<div class="danger-zone"><h3>현재 회의실</h3><button data-action="clear-writer-chat" class="danger">현재 회의실 기록 비우기</button></div></section>`;
 }
 function updateActiveMemoCountDom() {
-    const count = activeMemos().length;
+    const active = activeMemos();
+    const numberMap = new Map(active.map((memo, index) => [memo.uid, index + 1]));
+    const count = active.length;
     root?.querySelectorAll("[data-active-memo-count]").forEach((element) => {
         element.textContent = `활성 메모 ${count}개`;
+    });
+    root?.querySelectorAll("[data-memo-card]").forEach((card) => {
+        const memo = currentWorkspace?.memos.find((item) => item.uid === card.dataset.memoCard);
+        if (!memo)
+            return;
+        const number = numberMap.get(memo.uid);
+        const effective = number !== undefined;
+        card.classList.toggle("effective", effective);
+        card.classList.toggle("suppressed", !effective);
+        const title = card.querySelector(".memo-collapse-heading strong");
+        if (title)
+            title.textContent = effective ? `Memo(${number})` : memo.content.trim() ? "비활성 메모" : "새 메모";
+        const meta = card.querySelector(".memo-collapse-heading .meta");
+        if (meta)
+            meta.textContent = effective ? "본편 요청에 포함" : "현재 미포함";
     });
 }
 function updateWriterTokenInfoDom() {
@@ -3531,6 +3652,12 @@ async function handleClick(event) {
         return;
     }
     if (action === "close") {
+        try {
+            await flushScheduledWorkspaceSave();
+        }
+        catch (error) {
+            setStatus(`메모 자동 저장 실패: ${errorMessage(error)}`, "error", false);
+        }
         panelOpen = false;
         await finishPanelResize();
         await hideParentResizeShield();
@@ -3550,6 +3677,12 @@ async function handleClick(event) {
         return;
     }
     if (action === "tab") {
+        try {
+            await flushScheduledWorkspaceSave();
+        }
+        catch (error) {
+            setStatus(`메모 자동 저장 실패: ${errorMessage(error)}`, "error", false);
+        }
         activeTab = button.dataset.tab;
         if (activeTab === "context" && !currentContext)
             await refreshContext();
@@ -3581,6 +3714,12 @@ async function handleClick(event) {
         return;
     }
     if (action === "refresh-session") {
+        try {
+            await flushScheduledWorkspaceSave();
+        }
+        catch (error) {
+            setStatus(`메모 자동 저장 실패: ${errorMessage(error)}`, "error", false);
+        }
         if (panelMinimized)
             await setPanelMinimized(false);
         if (activeWriterRequest)
@@ -3839,9 +3978,7 @@ async function handleClick(event) {
         if (!folder || currentWorkspace.memoFolders.length <= 1 || !window.confirm(`“${folder.name}” 폴더를 삭제하시겠습니까? 내부 메모는 다른 폴더로 이동합니다.`))
             return;
         const destination = currentWorkspace.memoFolders.find((item) => item.id !== folder.id);
-        for (const memo of currentWorkspace.memos)
-            if (memo.folderId === folder.id)
-                memo.folderId = destination.id;
+        moveMemosToFolderEnd(currentWorkspace, currentWorkspace.memos.filter((memo) => memo.folderId === folder.id).map((memo) => memo.uid), destination.id);
         currentWorkspace.memoFolders = currentWorkspace.memoFolders.filter((item) => item.id !== folder.id);
         forgetMemoUiState([folder.id]);
         await saveCurrentWorkspace();
@@ -3860,16 +3997,6 @@ async function handleClick(event) {
         await saveCurrentWorkspace();
         await saveSettings();
         render();
-        return;
-    }
-    if (action === "save-memo" && currentWorkspace) {
-        await saveCurrentWorkspace();
-        currentContext = null;
-        const memo = currentWorkspace.memos.find((item) => item.uid === button.dataset.memoUid);
-        if (memo && isMemoEffectivelyEnabled(memo, currentWorkspace))
-            await ensureMemoReplacer();
-        const number = memo ? visibleMemoNumber(memo, currentWorkspace) : null;
-        setStatus(`${number ? `Memo(${number})` : "메모"}를 저장했습니다.`, "success");
         return;
     }
     if (action === "delete-memo" && currentWorkspace) {
@@ -3977,8 +4104,13 @@ function handleInput(event) {
     if (inputType === "memo-content" && currentWorkspace) {
         const memo = currentWorkspace.memos.find((item) => item.uid === target.dataset.memoUid);
         if (memo) {
+            const wasEffective = isMemoEffectivelyEnabled(memo, currentWorkspace);
             memo.content = target.value;
+            currentContext = null;
             updateActiveMemoCountDom();
+            scheduleWorkspaceSave();
+            if (!wasEffective && isMemoEffectivelyEnabled(memo, currentWorkspace))
+                void ensureMemoReplacer();
         }
         return;
     }
@@ -4125,8 +4257,9 @@ async function handleChange(event) {
     }
     if (changeType === "memo-folder" && currentWorkspace) {
         const memo = currentWorkspace.memos.find((item) => item.uid === target.dataset.memoUid);
-        if (memo && getMemoFolder(target.value))
-            memo.folderId = target.value;
+        if (memo && memo.folderId !== target.value && getMemoFolder(target.value)) {
+            moveMemosToFolderEnd(currentWorkspace, [memo.uid], target.value);
+        }
         await saveCurrentWorkspace();
         currentContext = null;
         renderPreservingPanelScroll();
@@ -4223,48 +4356,134 @@ function handleKeyDown(event) {
         void sendWriterMessage();
     }
 }
-function handleRegexDragStart(event) {
-    const card = event.target.closest(".regex-script-card");
-    if (!card?.dataset.regexId)
-        return;
-    draggedRegexScriptId = card.dataset.regexId;
-    card.classList.add("dragging");
-    event.dataTransfer?.setData("text/plain", draggedRegexScriptId);
-    if (event.dataTransfer)
-        event.dataTransfer.effectAllowed = "move";
+function clearReorderDropIndicator() {
+    activeReorderTarget = null;
+    root?.querySelectorAll(".reorder-drop-before, .reorder-drop-after").forEach((card) => {
+        card.classList.remove("reorder-drop-before", "reorder-drop-after");
+    });
 }
-function handleRegexDragOver(event) {
-    if (!draggedRegexScriptId || !event.target.closest(".regex-script-list"))
+function setReorderDropIndicator(target) {
+    if (activeReorderTarget
+        && activeReorderTarget.kind === target.kind
+        && activeReorderTarget.id === target.id
+        && activeReorderTarget.scopeId === target.scopeId
+        && activeReorderTarget.position === target.position)
         return;
+    clearReorderDropIndicator();
+    activeReorderTarget = target;
+    const card = Array.from(root.querySelectorAll(`[data-reorder-card="${target.kind}"]`))
+        .find((item) => item.dataset.reorderId === target.id && String(item.dataset.reorderScope || "") === target.scopeId);
+    card?.classList.add(target.position === "before" ? "reorder-drop-before" : "reorder-drop-after");
+}
+function handleReorderDragStart(event) {
+    const handle = event.target.closest("[data-reorder-kind][draggable=\"true\"]");
+    const kind = handle?.dataset.reorderKind;
+    const id = String(handle?.dataset.reorderId || "");
+    const scopeId = String(handle?.dataset.reorderScope || "");
+    if (!handle || !kind || !id)
+        return;
+    activeReorderDrag = { kind, id, scopeId };
+    const card = handle.closest(`[data-reorder-card="${kind}"]`);
+    card?.classList.add("reorder-dragging");
+    event.dataTransfer?.setData("text/plain", `${kind}:${id}`);
+    if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        if (card)
+            event.dataTransfer.setDragImage(card, 22, 22);
+    }
+}
+function handleReorderDragOver(event) {
+    const drag = activeReorderDrag;
+    if (!drag)
+        return;
+    const list = event.target.closest(`[data-reorder-list="${drag.kind}"]`);
+    if (!list || String(list.dataset.reorderScope || "") !== drag.scopeId) {
+        clearReorderDropIndicator();
+        return;
+    }
     event.preventDefault();
     if (event.dataTransfer)
         event.dataTransfer.dropEffect = "move";
+    const cards = Array.from(list.querySelectorAll(`:scope > [data-reorder-card="${drag.kind}"]`))
+        .filter((card) => card.dataset.reorderId !== drag.id);
+    if (cards.length === 0) {
+        clearReorderDropIndicator();
+        return;
+    }
+    let targetCard = cards[cards.length - 1];
+    let position = "after";
+    for (const card of cards) {
+        const rect = card.getBoundingClientRect();
+        if (event.clientY < rect.top + rect.height / 2) {
+            targetCard = card;
+            position = "before";
+            break;
+        }
+    }
+    setReorderDropIndicator({
+        kind: drag.kind,
+        id: String(targetCard.dataset.reorderId || ""),
+        scopeId: drag.scopeId,
+        position,
+    });
 }
-function handleRegexDrop(event) {
-    if (!draggedRegexScriptId)
+async function handleReorderDrop(event) {
+    const drag = activeReorderDrag;
+    const target = activeReorderTarget;
+    if (!drag || !target || drag.kind !== target.kind || drag.scopeId !== target.scopeId) {
+        handleReorderDragEnd();
         return;
-    const targetCard = event.target.closest(".regex-script-card");
-    const targetId = targetCard?.dataset.regexId;
-    if (!targetCard || !targetId || targetId === draggedRegexScriptId)
-        return;
+    }
     event.preventDefault();
-    const from = settings.contextRegexScripts.findIndex((script) => script.id === draggedRegexScriptId);
-    const targetIndex = settings.contextRegexScripts.findIndex((script) => script.id === targetId);
-    if (from < 0 || targetIndex < 0)
-        return;
-    const [moved] = settings.contextRegexScripts.splice(from, 1);
-    const adjustedTarget = settings.contextRegexScripts.findIndex((script) => script.id === targetId);
-    const rect = targetCard.getBoundingClientRect();
-    const insertAfter = event.clientY > rect.top + rect.height / 2;
-    settings.contextRegexScripts.splice(adjustedTarget + (insertAfter ? 1 : 0), 0, moved);
-    draggedRegexScriptId = null;
-    scheduleSettingsSave();
-    scheduleRegexContextRefresh();
-    renderPreservingPanelScroll();
+    const insertAfter = target.position === "after";
+    let changed = false;
+    let rollback = null;
+    const previousContext = currentContext;
+    try {
+        if (drag.kind === "regex") {
+            const previousScripts = settings.contextRegexScripts.slice();
+            changed = reorderListItem(settings.contextRegexScripts, drag.id, target.id, insertAfter, (script) => script.id);
+            if (changed) {
+                rollback = () => { settings.contextRegexScripts = previousScripts; };
+                await saveSettings();
+                scheduleRegexContextRefresh();
+            }
+        }
+        else if (drag.kind === "memo-folder" && currentWorkspace) {
+            const previousFolders = currentWorkspace.memoFolders.slice();
+            changed = reorderListItem(currentWorkspace.memoFolders, drag.id, target.id, insertAfter, (folder) => folder.id);
+            if (changed) {
+                rollback = () => { currentWorkspace.memoFolders = previousFolders; };
+                currentContext = null;
+                await saveCurrentWorkspace();
+            }
+        }
+        else if (drag.kind === "memo" && currentWorkspace) {
+            const previousMemos = currentWorkspace.memos.slice();
+            changed = reorderMemoWithinFolder(currentWorkspace, drag.scopeId, drag.id, target.id, insertAfter);
+            if (changed) {
+                rollback = () => { currentWorkspace.memos = previousMemos; };
+                currentContext = null;
+                await saveCurrentWorkspace();
+            }
+        }
+    }
+    catch (error) {
+        rollback?.();
+        currentContext = previousContext;
+        changed = false;
+        setStatus(`순서 저장 실패: ${errorMessage(error)}`, "error", false);
+    }
+    finally {
+        handleReorderDragEnd();
+    }
+    if (changed)
+        renderPreservingPanelScroll();
 }
-function handleRegexDragEnd() {
-    draggedRegexScriptId = null;
-    root?.querySelectorAll(".regex-script-card.dragging").forEach((card) => card.classList.remove("dragging"));
+function handleReorderDragEnd() {
+    activeReorderDrag = null;
+    clearReorderDropIndicator();
+    root?.querySelectorAll(".reorder-dragging").forEach((card) => card.classList.remove("reorder-dragging"));
 }
 function installStyles() {
     const style = document.createElement("style");
@@ -4368,7 +4587,18 @@ function installStyles() {
         .row { display:flex; align-items:center; gap:8px; }
         .between { justify-content:space-between; }
         .memo-list, .lore-list { display:grid; gap:12px; }
-        .memo-folder { margin-bottom:16px; padding:14px; border:1px solid var(--at-border); border-radius:14px; background:color-mix(in srgb, var(--at-panel) 78%, transparent); }
+        [data-reorder-card] { position:relative; }
+        [data-reorder-card].reorder-dragging { opacity:.42; }
+        [data-reorder-card].reorder-drop-before::before, [data-reorder-card].reorder-drop-after::after { content:""; position:absolute; right:4px; left:4px; z-index:20; height:5px; border-radius:999px; background:rgba(96,165,250,.88); box-shadow:0 0 0 1px rgba(191,219,254,.58),0 0 13px rgba(49,130,246,.68); pointer-events:none; }
+        [data-reorder-card].reorder-drop-before::before { top:-9px; }
+        [data-reorder-card].reorder-drop-after::after { bottom:-9px; }
+        .reorder-handle-column { min-width:0; display:flex; align-self:stretch; align-items:center; justify-content:center; border-right:1px solid var(--at-border-strong); border-radius:inherit 0 0 inherit; background:rgba(49,130,246,.035); color:#7d8795; cursor:grab; user-select:none; touch-action:none; transition:color .15s ease,background .15s ease; }
+        .reorder-handle-column:hover { background:rgba(49,130,246,.13); color:#8fbdff; }
+        .reorder-handle-column:active { cursor:grabbing; }
+        .reorder-grip { width:18px; height:28px; fill:currentColor; opacity:.9; pointer-events:none; }
+        .reorder-card-content { min-width:0; }
+        .memo-folder { margin-bottom:16px; padding:0; display:grid; grid-template-columns:42px minmax(0,1fr); border:1px solid var(--at-border); border-radius:14px; background:color-mix(in srgb, var(--at-panel) 78%, transparent); }
+        .memo-folder-content { padding:14px; }
         .memo-folder.disabled { opacity:.72; }
         .folder-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
         .memo-folder.collapsed .folder-heading { margin-bottom:0; }
@@ -4379,10 +4609,13 @@ function installStyles() {
         .folder-actions { flex:none; flex-wrap:wrap; justify-content:flex-end; }
         .folder-empty { padding:18px; color:var(--at-muted); text-align:center; border:1px dashed var(--at-border); border-radius:10px; }
         .memo-card, .lore-card, .preset-editor, .context-block, .danger-zone { padding:16px; border:1px solid var(--at-border); border-radius:12px; background:var(--at-panel); }
+        .memo-card { padding:0; display:grid; grid-template-columns:42px minmax(0,1fr); }
+        .memo-card-content { min-width:0; display:flex; flex-direction:column; padding:16px; }
         .memo-card.effective { border-left:4px solid var(--at-success); }
         .memo-card.suppressed { border-left:4px solid #667085; }
-        .memo-card.collapsed { padding-top:11px; padding-bottom:11px; }
-        .memo-card.expanded { min-height:clamp(320px, calc(100vh - 180px), 1100px); display:flex; flex-direction:column; }
+        .memo-card.collapsed { padding:0; }
+        .memo-card.collapsed .memo-card-content { padding-top:11px; padding-bottom:11px; }
+        .memo-card.expanded { min-height:clamp(320px, calc(100vh - 180px), 1100px); display:grid; }
         .memo-card-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
         .memo-heading-actions { flex:none; flex-wrap:wrap; justify-content:flex-end; }
         .memo-collapse-heading { margin:-4px 0; }
@@ -4450,9 +4683,8 @@ function installStyles() {
         .regex-manager-title:hover:not(:disabled), .regex-script-title:hover:not(:disabled) { border-color:transparent; background:rgba(255,255,255,.035); }
         .regex-help { margin:12px 2px; color:var(--at-muted); font-size:12px; }
         .regex-script-list { display:grid; gap:10px; }
-        .regex-script-card { padding:10px; border:1px solid var(--at-border); border-radius:10px; background:#0d1117; }
-        .regex-script-card.dragging { opacity:.45; }
-        .regex-drag-handle { flex:none; color:var(--at-muted); cursor:grab; letter-spacing:-3px; user-select:none; }
+        .regex-script-card { padding:0; display:grid; grid-template-columns:42px minmax(0,1fr); border:1px solid var(--at-border); border-radius:10px; background:#0d1117; }
+        .regex-script-content { padding:10px; }
         .regex-script-body { display:grid; gap:11px; padding:12px 5px 4px; }
         .regex-expression { min-height:78px; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; }
         .regex-flag { margin:0; color:var(--at-muted); font-size:12px; }
@@ -4641,7 +4873,8 @@ function installStyles() {
         .token-info { padding:18px; border-color:var(--at-border); background:#0b121d; }
         .token-bar { height:22px; border-color:#555d68; background:#777e88; }
         .memo-folder, .memo-card, .preset-editor, .danger-zone { border-color:var(--at-border); background:linear-gradient(180deg,rgba(20,23,28,.94),rgba(16,19,23,.94)); }
-        .memo-folder { padding:17px; border-radius:13px; }
+        .memo-folder { padding:0; border-radius:13px; }
+        .memo-folder-content { padding:17px; }
         .memo-folder.enabled { box-shadow:inset 3px 0 0 var(--at-accent); }
         .memo-card.effective { border-left:3px solid var(--at-accent); }
         .memo-card.suppressed { border-left:3px solid #484e57; }
@@ -5212,10 +5445,10 @@ async function initialize() {
     root.addEventListener("input", handleInput);
     root.addEventListener("change", (event) => void handleChange(event));
     root.addEventListener("keydown", handleKeyDown);
-    root.addEventListener("dragstart", handleRegexDragStart);
-    root.addEventListener("dragover", handleRegexDragOver);
-    root.addEventListener("drop", handleRegexDrop);
-    root.addEventListener("dragend", handleRegexDragEnd);
+    root.addEventListener("dragstart", handleReorderDragStart);
+    root.addEventListener("dragover", handleReorderDragOver);
+    root.addEventListener("drop", (event) => void handleReorderDrop(event));
+    root.addEventListener("dragend", handleReorderDragEnd);
     root.addEventListener("pointerdown", (event) => void startPanelDrag(event));
     root.addEventListener("pointermove", movePanel);
     root.addEventListener("pointerup", endPanelDrag);
@@ -5234,6 +5467,9 @@ async function initialize() {
         if (settingsSaveTimer !== undefined)
             window.clearTimeout(settingsSaveTimer);
         settingsSaveTimer = undefined;
+        if (workspaceSaveTimer !== undefined)
+            window.clearTimeout(workspaceSaveTimer);
+        workspaceSaveTimer = undefined;
         if (regexContextRefreshTimer !== undefined)
             window.clearTimeout(regexContextRefreshTimer);
         regexContextRefreshTimer = undefined;
@@ -5250,6 +5486,7 @@ async function initialize() {
                 void request.reader.cancel().catch(() => { });
         }
         pendingResizeGeometry = null;
+        handleReorderDragEnd();
         memoReceiptState = null;
         const observer = memoReceiptObserver;
         memoReceiptObserver = null;

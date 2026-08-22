@@ -135,7 +135,13 @@ function normalizeWriterMessage(value: any, memoFolderId: string): WriterMessage
             const after = change.after === null ? null : normalizeUndoMemo(change.after);
             if (before === null && after === null) return null;
             if ((change.before !== null && before === null) || (change.after !== null && after === null)) return null;
-            return { uid: change.uid, before, after };
+            return {
+                uid: change.uid,
+                before,
+                after,
+                beforeIndex: Number.isInteger(change.beforeIndex) && change.beforeIndex >= 0 ? change.beforeIndex : undefined,
+                afterIndex: Number.isInteger(change.afterIndex) && change.afterIndex >= 0 ? change.afterIndex : undefined,
+            };
         }).filter((change: MemoUndoChange | null): change is MemoUndoChange => change !== null)
         : null;
     const undoFolderValue = value.actionUndo?.createdFolder;
@@ -216,7 +222,6 @@ function normalizeWorkspace(value: any): BotWorkspace {
                 enabled: memo.enabled !== false,
                 createdAt: typeof memo.createdAt === "number" ? memo.createdAt : Date.now() + index,
             }))
-            .sort((a: Memo, b: Memo) => a.createdAt - b.createdAt || a.uid.localeCompare(b.uid))
         : [];
     return {
         version: 4,
@@ -417,8 +422,17 @@ async function saveSettings(): Promise<void> {
 }
 
 async function saveCurrentWorkspace(): Promise<void> {
-    if (currentWorkspace) await writeStoredJson(GLOBAL_WORKSPACE_KEY, currentWorkspace);
-    if (currentIdentity) await writeStoredJson(loreOverridesStorageKey(currentIdentity.characterId), currentLoreOverrides);
+    if (workspaceSaveTimer !== undefined) window.clearTimeout(workspaceSaveTimer);
+    workspaceSaveTimer = undefined;
+    const workspaceSnapshot = currentWorkspace ? safeClone(currentWorkspace) : null;
+    const loreKey = currentIdentity ? loreOverridesStorageKey(currentIdentity.characterId) : "";
+    const loreSnapshot = currentIdentity ? safeClone(currentLoreOverrides) : null;
+    const save = workspaceSavePromise.catch(() => undefined).then(async () => {
+        if (workspaceSnapshot) await writeStoredJson(GLOBAL_WORKSPACE_KEY, workspaceSnapshot);
+        if (loreKey && loreSnapshot) await writeStoredJson(loreKey, loreSnapshot);
+    });
+    workspaceSavePromise = save.then(() => undefined, () => undefined);
+    return save;
 }
 
 function scheduleSettingsSave(): void {
@@ -426,6 +440,24 @@ function scheduleSettingsSave(): void {
     settingsSaveTimer = window.setTimeout(() => {
         void saveSettings().catch((error) => setStatus(`설정 저장 실패: ${errorMessage(error)}`, "error"));
     }, 250);
+}
+
+function scheduleWorkspaceSave(): void {
+    if (workspaceSaveTimer !== undefined) window.clearTimeout(workspaceSaveTimer);
+    workspaceSaveTimer = window.setTimeout(() => {
+        workspaceSaveTimer = undefined;
+        void saveCurrentWorkspace().catch((error) => setStatus(`메모 자동 저장 실패: ${errorMessage(error)}`, "error"));
+    }, 300);
+}
+
+async function flushScheduledWorkspaceSave(): Promise<void> {
+    if (workspaceSaveTimer !== undefined) {
+        window.clearTimeout(workspaceSaveTimer);
+        workspaceSaveTimer = undefined;
+        await saveCurrentWorkspace();
+        return;
+    }
+    await workspaceSavePromise;
 }
 
 function scheduleRegexContextRefresh(): void {
@@ -516,11 +548,64 @@ function isMemoEffectivelyEnabled(memo: Memo, workspace: BotWorkspace | null = c
     return Boolean(workspace && folder?.enabled && memo.enabled && memo.content.trim());
 }
 
+function orderedMemos(workspace: BotWorkspace): Memo[] {
+    const ordered: Memo[] = [];
+    const included = new Set<string>();
+    for (const folder of workspace.memoFolders) {
+        for (const memo of workspace.memos) {
+            if (memo.folderId !== folder.id) continue;
+            ordered.push(memo);
+            included.add(memo.uid);
+        }
+    }
+    for (const memo of workspace.memos) {
+        if (!included.has(memo.uid)) ordered.push(memo);
+    }
+    return ordered;
+}
+
+function reorderListItem<T>(items: T[], movedId: string, targetId: string, insertAfter: boolean, getId: (item: T) => string): boolean {
+    const from = items.findIndex((item) => getId(item) === movedId);
+    const target = items.findIndex((item) => getId(item) === targetId);
+    if (from < 0 || target < 0 || from === target) return false;
+    const before = items.map(getId).join("\u0000");
+    const [moved] = items.splice(from, 1);
+    const adjustedTarget = items.findIndex((item) => getId(item) === targetId);
+    items.splice(adjustedTarget + (insertAfter ? 1 : 0), 0, moved);
+    return before !== items.map(getId).join("\u0000");
+}
+
+function reorderMemoWithinFolder(workspace: BotWorkspace, folderId: string, movedUid: string, targetUid: string, insertAfter: boolean): boolean {
+    const indexes: number[] = [];
+    const scoped: Memo[] = [];
+    workspace.memos.forEach((memo, index) => {
+        if (memo.folderId !== folderId) return;
+        indexes.push(index);
+        scoped.push(memo);
+    });
+    if (!reorderListItem(scoped, movedUid, targetUid, insertAfter, (memo) => memo.uid)) return false;
+    indexes.forEach((workspaceIndex, index) => {
+        workspace.memos[workspaceIndex] = scoped[index];
+    });
+    return true;
+}
+
+function moveMemosToFolderEnd(workspace: BotWorkspace, memoUids: string[], folderId: string): void {
+    const movingIds = new Set(memoUids);
+    const moving = workspace.memos.filter((memo) => movingIds.has(memo.uid));
+    if (moving.length === 0) return;
+    workspace.memos = workspace.memos.filter((memo) => !movingIds.has(memo.uid));
+    for (const memo of moving) memo.folderId = folderId;
+    let insertAt = -1;
+    for (let index = 0; index < workspace.memos.length; index++) {
+        if (workspace.memos[index].folderId === folderId) insertAt = index;
+    }
+    workspace.memos.splice(insertAt + 1, 0, ...moving);
+}
+
 function activeMemos(workspace: BotWorkspace | null = currentWorkspace): Memo[] {
     return workspace
-        ? workspace.memos
-            .filter((memo) => isMemoEffectivelyEnabled(memo, workspace))
-            .sort((a, b) => a.createdAt - b.createdAt || a.uid.localeCompare(b.uid))
+        ? orderedMemos(workspace).filter((memo) => isMemoEffectivelyEnabled(memo, workspace))
         : [];
 }
 

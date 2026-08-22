@@ -30,13 +30,23 @@ let memoReplacerReady = false;
 let memoReplacerPermissionDenied = false;
 let mainDomPermissionDenied = false;
 let settingsSaveTimer: number | undefined;
+let workspaceSaveTimer: number | undefined;
+let workspaceSavePromise: Promise<void> = Promise.resolve();
 let regexContextRefreshTimer: number | undefined;
 let regexContextRefreshGeneration = 0;
 let regexManagerOpen = false;
 const expandedRegexScriptIds = new Set<string>();
 const collapsedChatMessageKeys = new Set<string>();
 const contextRegexErrors = new Map<string, string>();
-let draggedRegexScriptId: string | null = null;
+type ReorderKind = "regex" | "memo" | "memo-folder";
+interface ReorderTarget {
+    kind: ReorderKind;
+    id: string;
+    scopeId: string;
+    position: "before" | "after";
+}
+let activeReorderDrag: { kind: ReorderKind; id: string; scopeId: string } | null = null;
+let activeReorderTarget: ReorderTarget | null = null;
 let root: HTMLDivElement;
 let editingMessageId: string | null = null;
 let editingMessageDraft = "";

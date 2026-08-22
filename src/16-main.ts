@@ -31,10 +31,10 @@ async function initialize(): Promise<void> {
     root.addEventListener("input", handleInput);
     root.addEventListener("change", (event) => void handleChange(event));
     root.addEventListener("keydown", handleKeyDown);
-    root.addEventListener("dragstart", handleRegexDragStart);
-    root.addEventListener("dragover", handleRegexDragOver);
-    root.addEventListener("drop", handleRegexDrop);
-    root.addEventListener("dragend", handleRegexDragEnd);
+    root.addEventListener("dragstart", handleReorderDragStart);
+    root.addEventListener("dragover", handleReorderDragOver);
+    root.addEventListener("drop", (event) => void handleReorderDrop(event));
+    root.addEventListener("dragend", handleReorderDragEnd);
     root.addEventListener("pointerdown", (event) => void startPanelDrag(event));
     root.addEventListener("pointermove", movePanel);
     root.addEventListener("pointerup", endPanelDrag);
@@ -54,6 +54,8 @@ async function initialize(): Promise<void> {
         panelOpen = false;
         if (settingsSaveTimer !== undefined) window.clearTimeout(settingsSaveTimer);
         settingsSaveTimer = undefined;
+        if (workspaceSaveTimer !== undefined) window.clearTimeout(workspaceSaveTimer);
+        workspaceSaveTimer = undefined;
         if (regexContextRefreshTimer !== undefined) window.clearTimeout(regexContextRefreshTimer);
         regexContextRefreshTimer = undefined;
         if (memoReceiptRepairTimer !== undefined) window.clearTimeout(memoReceiptRepairTimer);
@@ -67,6 +69,7 @@ async function initialize(): Promise<void> {
             if (request.reader) void request.reader.cancel().catch(() => {});
         }
         pendingResizeGeometry = null;
+        handleReorderDragEnd();
         memoReceiptState = null;
         const observer = memoReceiptObserver;
         memoReceiptObserver = null;

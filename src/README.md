@@ -1,6 +1,6 @@
 # 소스 코드 안내
 
-이 폴더의 TypeScript 파일들이 플러그인의 개발 원본입니다. `npm run build`를 실행하면 파일들이 `tsconfig.json`에 적힌 순서대로 합쳐져 루트의 단일 배포 파일 `summon_author_v1.1.0.js`가 됩니다.
+이 폴더의 TypeScript 파일들이 플러그인의 개발 원본입니다. `npm run build`를 실행하면 파일들이 `tsconfig.json`에 적힌 순서대로 합쳐져 루트의 단일 배포 파일 `summon_author_v1.1.1.js`가 됩니다.
 
 ## 파일별 역할
 
@@ -24,7 +24,7 @@
 
 ## 편집 규칙
 
-- 배포용 `summon_author_v1.1.0.js`는 직접 수정하지 않습니다.
+- 배포용 `summon_author_v1.1.1.js`는 직접 수정하지 않습니다.
 - 기능에 맞는 `src` 파일을 수정한 뒤 `npm run check`와 `npm run build`를 실행합니다.
 - 이 파일들은 하나의 전역 스크립트로 합쳐지므로 현재 구조에서는 `import`나 `export`를 추가하지 않습니다.
 - 새 파일을 추가하면 `tsconfig.json`의 `files` 목록에도 실행 순서에 맞게 추가합니다.
