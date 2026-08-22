@@ -2,13 +2,29 @@
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
+    "module": "None",
     "strict": true,
-    "noEmit": true,
+    "alwaysStrict": false,
+    "outFile": "summon_author_v1.1.0.js",
     "skipLibCheck": true
   },
   "files": [
-    "index.ts"
+    "src/00-header.ts",
+    "src/01-state.ts",
+    "src/02-utils.ts",
+    "src/03-storage.ts",
+    "src/04-cbs.ts",
+    "src/05-context-regex.ts",
+    "src/06-context-sources.ts",
+    "src/07-lore.ts",
+    "src/08-context-builder.ts",
+    "src/09-memo-injection.ts",
+    "src/10-memo-actions.ts",
+    "src/11-writer-request.ts",
+    "src/12-ui-render.ts",
+    "src/13-ui-events.ts",
+    "src/14-ui-styles.ts",
+    "src/15-panel.ts",
+    "src/16-main.ts"
   ]
 }
