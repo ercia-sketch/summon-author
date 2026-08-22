@@ -1,6 +1,6 @@
 {
   "name": "summon-author-risuai-plugin",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "RisuAI API 3.0 plugin for a separate AI writers' room and memo workflow",
   "scripts": {

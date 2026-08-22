@@ -88,6 +88,11 @@ async function handleClick(event: MouseEvent): Promise<void> {
         return;
     }
     if (action === "close") {
+        try {
+            await flushScheduledWorkspaceSave();
+        } catch (error) {
+            setStatus(`메모 자동 저장 실패: ${errorMessage(error)}`, "error", false);
+        }
         panelOpen = false;
         await finishPanelResize();
         await hideParentResizeShield();
@@ -107,6 +112,11 @@ async function handleClick(event: MouseEvent): Promise<void> {
         return;
     }
     if (action === "tab") {
+        try {
+            await flushScheduledWorkspaceSave();
+        } catch (error) {
+            setStatus(`메모 자동 저장 실패: ${errorMessage(error)}`, "error", false);
+        }
         activeTab = button.dataset.tab as typeof activeTab;
         if (activeTab === "context" && !currentContext) await refreshContext();
         else render();
@@ -133,6 +143,11 @@ async function handleClick(event: MouseEvent): Promise<void> {
         return;
     }
     if (action === "refresh-session") {
+        try {
+            await flushScheduledWorkspaceSave();
+        } catch (error) {
+            setStatus(`메모 자동 저장 실패: ${errorMessage(error)}`, "error", false);
+        }
         if (panelMinimized) await setPanelMinimized(false);
         if (activeWriterRequest) await abandonActiveWriterRequest();
         currentContext = null;
@@ -354,7 +369,7 @@ async function handleClick(event: MouseEvent): Promise<void> {
         const folder = getMemoFolder(String(button.dataset.folderId));
         if (!folder || currentWorkspace.memoFolders.length <= 1 || !window.confirm(`“${folder.name}” 폴더를 삭제하시겠습니까? 내부 메모는 다른 폴더로 이동합니다.`)) return;
         const destination = currentWorkspace.memoFolders.find((item) => item.id !== folder.id)!;
-        for (const memo of currentWorkspace.memos) if (memo.folderId === folder.id) memo.folderId = destination.id;
+        moveMemosToFolderEnd(currentWorkspace, currentWorkspace.memos.filter((memo) => memo.folderId === folder.id).map((memo) => memo.uid), destination.id);
         currentWorkspace.memoFolders = currentWorkspace.memoFolders.filter((item) => item.id !== folder.id);
         forgetMemoUiState([folder.id]);
         await saveCurrentWorkspace();
@@ -372,15 +387,6 @@ async function handleClick(event: MouseEvent): Promise<void> {
         await saveCurrentWorkspace();
         await saveSettings();
         render();
-        return;
-    }
-    if (action === "save-memo" && currentWorkspace) {
-        await saveCurrentWorkspace();
-        currentContext = null;
-        const memo = currentWorkspace.memos.find((item) => item.uid === button.dataset.memoUid);
-        if (memo && isMemoEffectivelyEnabled(memo, currentWorkspace)) await ensureMemoReplacer();
-        const number = memo ? visibleMemoNumber(memo, currentWorkspace) : null;
-        setStatus(`${number ? `Memo(${number})` : "메모"}를 저장했습니다.`, "success");
         return;
     }
     if (action === "delete-memo" && currentWorkspace) {
@@ -481,8 +487,12 @@ function handleInput(event: Event): void {
     if (inputType === "memo-content" && currentWorkspace) {
         const memo = currentWorkspace.memos.find((item) => item.uid === target.dataset.memoUid);
         if (memo) {
+            const wasEffective = isMemoEffectivelyEnabled(memo, currentWorkspace);
             memo.content = target.value;
+            currentContext = null;
             updateActiveMemoCountDom();
+            scheduleWorkspaceSave();
+            if (!wasEffective && isMemoEffectivelyEnabled(memo, currentWorkspace)) void ensureMemoReplacer();
         }
         return;
     }
@@ -609,7 +619,9 @@ async function handleChange(event: Event): Promise<void> {
     }
     if (changeType === "memo-folder" && currentWorkspace) {
         const memo = currentWorkspace.memos.find((item) => item.uid === target.dataset.memoUid);
-        if (memo && getMemoFolder(target.value)) memo.folderId = target.value;
+        if (memo && memo.folderId !== target.value && getMemoFolder(target.value)) {
+            moveMemosToFolderEnd(currentWorkspace, [memo.uid], target.value);
+        }
         await saveCurrentWorkspace();
         currentContext = null;
         renderPreservingPanelScroll();
@@ -695,42 +707,127 @@ function handleKeyDown(event: KeyboardEvent): void {
     }
 }
 
-function handleRegexDragStart(event: DragEvent): void {
-    const card = (event.target as HTMLElement).closest<HTMLElement>(".regex-script-card");
-    if (!card?.dataset.regexId) return;
-    draggedRegexScriptId = card.dataset.regexId;
-    card.classList.add("dragging");
-    event.dataTransfer?.setData("text/plain", draggedRegexScriptId);
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+function clearReorderDropIndicator(): void {
+    activeReorderTarget = null;
+    root?.querySelectorAll(".reorder-drop-before, .reorder-drop-after").forEach((card) => {
+        card.classList.remove("reorder-drop-before", "reorder-drop-after");
+    });
 }
 
-function handleRegexDragOver(event: DragEvent): void {
-    if (!draggedRegexScriptId || !(event.target as HTMLElement).closest(".regex-script-list")) return;
+function setReorderDropIndicator(target: ReorderTarget): void {
+    if (activeReorderTarget
+        && activeReorderTarget.kind === target.kind
+        && activeReorderTarget.id === target.id
+        && activeReorderTarget.scopeId === target.scopeId
+        && activeReorderTarget.position === target.position) return;
+    clearReorderDropIndicator();
+    activeReorderTarget = target;
+    const card = Array.from(root.querySelectorAll<HTMLElement>(`[data-reorder-card="${target.kind}"]`))
+        .find((item) => item.dataset.reorderId === target.id && String(item.dataset.reorderScope || "") === target.scopeId);
+    card?.classList.add(target.position === "before" ? "reorder-drop-before" : "reorder-drop-after");
+}
+
+function handleReorderDragStart(event: DragEvent): void {
+    const handle = (event.target as HTMLElement).closest<HTMLElement>("[data-reorder-kind][draggable=\"true\"]");
+    const kind = handle?.dataset.reorderKind as ReorderKind | undefined;
+    const id = String(handle?.dataset.reorderId || "");
+    const scopeId = String(handle?.dataset.reorderScope || "");
+    if (!handle || !kind || !id) return;
+    activeReorderDrag = { kind, id, scopeId };
+    const card = handle.closest<HTMLElement>(`[data-reorder-card="${kind}"]`);
+    card?.classList.add("reorder-dragging");
+    event.dataTransfer?.setData("text/plain", `${kind}:${id}`);
+    if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        if (card) event.dataTransfer.setDragImage(card, 22, 22);
+    }
+}
+
+function handleReorderDragOver(event: DragEvent): void {
+    const drag = activeReorderDrag;
+    if (!drag) return;
+    const list = (event.target as HTMLElement).closest<HTMLElement>(`[data-reorder-list="${drag.kind}"]`);
+    if (!list || String(list.dataset.reorderScope || "") !== drag.scopeId) {
+        clearReorderDropIndicator();
+        return;
+    }
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    const cards = Array.from(list.querySelectorAll<HTMLElement>(`:scope > [data-reorder-card="${drag.kind}"]`))
+        .filter((card) => card.dataset.reorderId !== drag.id);
+    if (cards.length === 0) {
+        clearReorderDropIndicator();
+        return;
+    }
+    let targetCard = cards[cards.length - 1];
+    let position: ReorderTarget["position"] = "after";
+    for (const card of cards) {
+        const rect = card.getBoundingClientRect();
+        if (event.clientY < rect.top + rect.height / 2) {
+            targetCard = card;
+            position = "before";
+            break;
+        }
+    }
+    setReorderDropIndicator({
+        kind: drag.kind,
+        id: String(targetCard.dataset.reorderId || ""),
+        scopeId: drag.scopeId,
+        position,
+    });
 }
 
-function handleRegexDrop(event: DragEvent): void {
-    if (!draggedRegexScriptId) return;
-    const targetCard = (event.target as HTMLElement).closest<HTMLElement>(".regex-script-card");
-    const targetId = targetCard?.dataset.regexId;
-    if (!targetCard || !targetId || targetId === draggedRegexScriptId) return;
+async function handleReorderDrop(event: DragEvent): Promise<void> {
+    const drag = activeReorderDrag;
+    const target = activeReorderTarget;
+    if (!drag || !target || drag.kind !== target.kind || drag.scopeId !== target.scopeId) {
+        handleReorderDragEnd();
+        return;
+    }
     event.preventDefault();
-    const from = settings.contextRegexScripts.findIndex((script) => script.id === draggedRegexScriptId);
-    const targetIndex = settings.contextRegexScripts.findIndex((script) => script.id === targetId);
-    if (from < 0 || targetIndex < 0) return;
-    const [moved] = settings.contextRegexScripts.splice(from, 1);
-    const adjustedTarget = settings.contextRegexScripts.findIndex((script) => script.id === targetId);
-    const rect = targetCard.getBoundingClientRect();
-    const insertAfter = event.clientY > rect.top + rect.height / 2;
-    settings.contextRegexScripts.splice(adjustedTarget + (insertAfter ? 1 : 0), 0, moved);
-    draggedRegexScriptId = null;
-    scheduleSettingsSave();
-    scheduleRegexContextRefresh();
-    renderPreservingPanelScroll();
+    const insertAfter = target.position === "after";
+    let changed = false;
+    let rollback: (() => void) | null = null;
+    const previousContext = currentContext;
+    try {
+        if (drag.kind === "regex") {
+            const previousScripts = settings.contextRegexScripts.slice();
+            changed = reorderListItem(settings.contextRegexScripts, drag.id, target.id, insertAfter, (script) => script.id);
+            if (changed) {
+                rollback = () => { settings.contextRegexScripts = previousScripts; };
+                await saveSettings();
+                scheduleRegexContextRefresh();
+            }
+        } else if (drag.kind === "memo-folder" && currentWorkspace) {
+            const previousFolders = currentWorkspace.memoFolders.slice();
+            changed = reorderListItem(currentWorkspace.memoFolders, drag.id, target.id, insertAfter, (folder) => folder.id);
+            if (changed) {
+                rollback = () => { currentWorkspace!.memoFolders = previousFolders; };
+                currentContext = null;
+                await saveCurrentWorkspace();
+            }
+        } else if (drag.kind === "memo" && currentWorkspace) {
+            const previousMemos = currentWorkspace.memos.slice();
+            changed = reorderMemoWithinFolder(currentWorkspace, drag.scopeId, drag.id, target.id, insertAfter);
+            if (changed) {
+                rollback = () => { currentWorkspace!.memos = previousMemos; };
+                currentContext = null;
+                await saveCurrentWorkspace();
+            }
+        }
+    } catch (error) {
+        rollback?.();
+        currentContext = previousContext;
+        changed = false;
+        setStatus(`순서 저장 실패: ${errorMessage(error)}`, "error", false);
+    } finally {
+        handleReorderDragEnd();
+    }
+    if (changed) renderPreservingPanelScroll();
 }
 
-function handleRegexDragEnd(): void {
-    draggedRegexScriptId = null;
-    root?.querySelectorAll(".regex-script-card.dragging").forEach((card) => card.classList.remove("dragging"));
+function handleReorderDragEnd(): void {
+    activeReorderDrag = null;
+    clearReorderDropIndicator();
+    root?.querySelectorAll(".reorder-dragging").forEach((card) => card.classList.remove("reorder-dragging"));
 }

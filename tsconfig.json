@@ -5,7 +5,7 @@
     "module": "None",
     "strict": true,
     "alwaysStrict": false,
-    "outFile": "summon_author_v1.1.0.js",
+    "outFile": "summon_author_v1.1.1.js",
     "skipLibCheck": true
   },
   "files": [

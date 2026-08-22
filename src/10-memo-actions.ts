@@ -48,11 +48,15 @@ function memoFolderEquals(left: MemoFolder | undefined | null, right: MemoFolder
 function memoUndoChanges(before: Memo[], after: Memo[]): MemoUndoChange[] {
     const beforeByUid = new Map(before.map((memo) => [memo.uid, memo]));
     const afterByUid = new Map(after.map((memo) => [memo.uid, memo]));
+    const beforeIndexByUid = new Map(before.map((memo, index) => [memo.uid, index]));
+    const afterIndexByUid = new Map(after.map((memo, index) => [memo.uid, index]));
     const uids = new Set([...beforeByUid.keys(), ...afterByUid.keys()]);
     return [...uids].filter((uid) => !memoEquals(beforeByUid.get(uid), afterByUid.get(uid))).map((uid) => ({
         uid,
         before: beforeByUid.has(uid) ? safeClone(beforeByUid.get(uid)!) : null,
         after: afterByUid.has(uid) ? safeClone(afterByUid.get(uid)!) : null,
+        beforeIndex: beforeIndexByUid.get(uid),
+        afterIndex: afterIndexByUid.get(uid),
     }));
 }
 
@@ -95,7 +99,7 @@ async function applyMemoActions(messageId: string): Promise<void> {
         if (changes.length === 0) throw new Error("실제로 변경되는 메모가 없습니다.");
         message.actionUndo = { changes, createdFolder };
         currentWorkspace.memoFolders = nextFolders;
-        currentWorkspace.memos = nextMemos.sort((a, b) => a.createdAt - b.createdAt || a.uid.localeCompare(b.uid));
+        currentWorkspace.memos = nextMemos;
         message.actionState = "applied";
         try {
             await saveCurrentWorkspace();
@@ -141,7 +145,11 @@ async function undoMemoActions(messageId: string): Promise<void> {
             } else if (index >= 0) {
                 nextMemos[index] = safeClone(change.before);
             } else {
-                nextMemos.push(safeClone(change.before));
+                const fallbackIndex = nextMemos.findIndex((memo) => memo.createdAt > change.before!.createdAt);
+                const insertAt = change.beforeIndex === undefined
+                    ? fallbackIndex < 0 ? nextMemos.length : fallbackIndex
+                    : Math.min(change.beforeIndex, nextMemos.length);
+                nextMemos.splice(insertAt, 0, safeClone(change.before));
             }
         }
         const nextFolders = safeClone(currentWorkspace.memoFolders);
@@ -151,7 +159,7 @@ async function undoMemoActions(messageId: string): Promise<void> {
             if (folderIndex >= 0 && memoFolderEquals(nextFolders[folderIndex], createdFolder)) nextFolders.splice(folderIndex, 1);
         }
         currentWorkspace.memoFolders = nextFolders;
-        currentWorkspace.memos = nextMemos.sort((a, b) => a.createdAt - b.createdAt || a.uid.localeCompare(b.uid));
+        currentWorkspace.memos = nextMemos;
         message.actionState = "undone";
         try {
             await saveCurrentWorkspace();
