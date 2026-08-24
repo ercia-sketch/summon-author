@@ -32,6 +32,7 @@ function memoEquals(left: Memo | undefined | null, right: Memo | undefined | nul
     if (!left || !right) return left === right;
     return left.uid === right.uid
         && left.folderId === right.folderId
+        && left.displayName === right.displayName
         && left.content === right.content
         && left.enabled === right.enabled
         && left.createdAt === right.createdAt;
@@ -83,7 +84,7 @@ async function applyMemoActions(messageId: string): Promise<void> {
         }
         for (const action of message.pendingActions) {
             if (action.operation === "create") {
-                nextMemos.push({ uid: uuid(), folderId: writerFolderId, content: action.content!, enabled: true, createdAt: Date.now() + nextMemos.length });
+                nextMemos.push({ uid: uuid(), folderId: writerFolderId, displayName: "", content: action.content!, enabled: true, createdAt: Date.now() + nextMemos.length });
                 continue;
             }
             const targetUid = action.id ? numberMap[String(action.id)] : undefined;

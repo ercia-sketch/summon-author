@@ -1,12 +1,12 @@
 # 소스 코드 안내
 
-이 폴더의 TypeScript 파일들이 플러그인의 개발 원본입니다. `npm run build`를 실행하면 파일들이 `tsconfig.json`에 적힌 순서대로 합쳐져 루트의 단일 배포 파일 `summon_author_v1.1.1.js`가 됩니다.
+이 폴더의 TypeScript 파일들이 플러그인의 개발 원본입니다. `npm run build`를 실행하면 파일들이 `tsconfig.json`에 적힌 순서대로 합쳐지고 `markdown-it` 브라우저 빌드가 포함되어, 루트의 단일 배포 파일 `summon_author_v1.1.2.js`가 됩니다.
 
 ## 파일별 역할
 
 - `00-header.ts`: 플러그인 메타데이터, 공통 타입, 기본 프롬프트와 저장 키
 - `01-state.ts`: 기본 설정과 실행 중 공유 상태
-- `02-utils.ts`: HTML, 마크다운, 토큰 추정 등의 공통 함수
+- `02-utils.ts`: HTML, 마크다운 렌더러 설정, 토큰 추정 등의 공통 함수
 - `03-storage.ts`: 설정·작업공간 저장, 정규화, 구버전 마이그레이션
 - `04-cbs.ts`: CBS 문법 평가와 화면 표시
 - `05-context-regex.ts`: 작가 컨텍스트 정규식 처리
@@ -24,8 +24,9 @@
 
 ## 편집 규칙
 
-- 배포용 `summon_author_v1.1.1.js`는 직접 수정하지 않습니다.
-- 기능에 맞는 `src` 파일을 수정한 뒤 `npm run check`와 `npm run build`를 실행합니다.
+- 배포용 `summon_author_v1.1.2.js`는 직접 수정하지 않습니다.
+- 기능에 맞는 `src` 파일을 수정한 뒤 `npm run check`, `npm run build`, `npm run test:built`를 실행합니다.
 - 이 파일들은 하나의 전역 스크립트로 합쳐지므로 현재 구조에서는 `import`나 `export`를 추가하지 않습니다.
+- 마크다운 라이브러리 조립과 제3자 라이선스 포함은 `scripts/build.cjs`에서 처리합니다.
 - 새 파일을 추가하면 `tsconfig.json`의 `files` 목록에도 실행 순서에 맞게 추가합니다.
 - 저장 키나 스키마 버전을 변경할 때는 기존 사용자의 저장 데이터 마이그레이션을 함께 검토합니다.
