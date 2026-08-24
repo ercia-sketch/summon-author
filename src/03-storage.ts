@@ -37,6 +37,7 @@ function normalizeContextRegexScript(value: any): ContextRegexScript | null {
         name: typeof value.name === "string" ? value.name : "",
         input: typeof value.input === "string" ? value.input : "",
         output: typeof value.output === "string" ? value.output : "",
+        enabled: value.enabled !== false,
     };
 }
 
@@ -89,7 +90,7 @@ async function loadSettings(): Promise<PluginSettings> {
         : [];
 
     const normalized: PluginSettings = {
-        version: 6,
+        version: 7,
         selectedBasePresetId: typeof stored.selectedBasePresetId === "string" ? stored.selectedBasePresetId : BUILTIN_BASE_ID,
         selectedAdditionalPresetId: typeof stored.selectedAdditionalPresetId === "string" ? stored.selectedAdditionalPresetId : BUILTIN_ADDITIONAL_ID,
         customBasePresets,
@@ -123,6 +124,7 @@ function normalizeWriterMessage(value: any, memoFolderId: string): WriterMessage
         return {
             uid: memo.uid,
             folderId: typeof memo.folderId === "string" ? memo.folderId : memoFolderId,
+            displayName: typeof memo.displayName === "string" ? memo.displayName : "",
             content: memo.content,
             enabled: memo.enabled !== false,
             createdAt: typeof memo.createdAt === "number" ? memo.createdAt : Date.now(),
@@ -218,6 +220,7 @@ function normalizeWorkspace(value: any): BotWorkspace {
             .map((memo: any, index: number) => ({
                 uid: typeof memo.uid === "string" && memo.uid ? memo.uid : uuid(),
                 folderId: typeof memo.folderId === "string" && validFolderIds.has(memo.folderId) ? memo.folderId : defaultFolderId,
+                displayName: typeof memo.displayName === "string" ? memo.displayName : "",
                 content: memo.content,
                 enabled: memo.enabled !== false,
                 createdAt: typeof memo.createdAt === "number" ? memo.createdAt : Date.now() + index,
@@ -280,7 +283,7 @@ async function migrateLegacyWorkspace(characterId: string, currentChatId: string
         if (Array.isArray(legacy.memos)) {
             for (const memo of legacy.memos) {
                 if (!memo || typeof memo.content !== "string") continue;
-                workspace.memos.push({ uid: uuid(), folderId, content: memo.content, enabled: memo.enabled !== false, createdAt: Date.now() + workspace.memos.length });
+                workspace.memos.push({ uid: uuid(), folderId, displayName: "", content: memo.content, enabled: memo.enabled !== false, createdAt: Date.now() + workspace.memos.length });
             }
         }
         if (legacy.loreOverrides && typeof legacy.loreOverrides === "object") {

@@ -59,7 +59,7 @@ async function handleClick(event: MouseEvent): Promise<void> {
         return;
     }
     if (action === "new-regex-script") {
-        const script: ContextRegexScript = { id: `regex-${uuid()}`, name: nextRegexScriptName(), input: "", output: "" };
+        const script: ContextRegexScript = { id: `regex-${uuid()}`, name: nextRegexScriptName(), input: "", output: "", enabled: true };
         settings.contextRegexScripts.push(script);
         regexManagerOpen = true;
         expandedRegexScriptIds.add(script.id);
@@ -271,6 +271,24 @@ async function handleClick(event: MouseEvent): Promise<void> {
         render();
         return;
     }
+    if (action === "copy-message") {
+        const message = getCurrentRoom()?.writerMessages.find((item) => item.id === button.dataset.messageId);
+        if (!message) return;
+        try {
+            await copyTextToClipboard(message.content);
+            const originalText = button.textContent || "복사";
+            button.textContent = "복사됨";
+            button.setAttribute("disabled", "true");
+            window.setTimeout(() => {
+                if (!button.isConnected) return;
+                button.textContent = originalText;
+                button.removeAttribute("disabled");
+            }, 1200);
+        } catch (error) {
+            setStatus(`메시지 복사 실패: ${errorMessage(error)}`, "error");
+        }
+        return;
+    }
     if (action === "edit-message") {
         const room = getCurrentRoom();
         const message = room?.writerMessages.find((item) => item.id === button.dataset.messageId);
@@ -344,6 +362,17 @@ async function handleClick(event: MouseEvent): Promise<void> {
         renderPreservingPanelScroll();
         return;
     }
+    if (action === "rename-memo" && currentWorkspace) {
+        const memo = currentWorkspace.memos.find((item) => item.uid === button.dataset.memoUid);
+        if (!memo) return;
+        const value = window.prompt("메모 이름 변경 (표시용 이름이며 모델에 전달되지 않음)", memo.displayName);
+        if (value === null) return;
+        memo.displayName = value.trim();
+        await saveCurrentWorkspace();
+        void refreshMemoReceiptDisplayName(memo);
+        renderPreservingPanelScroll();
+        return;
+    }
     if (action === "new-memo-folder" && currentWorkspace) {
         const name = window.prompt("새 메모 폴더 이름", `메모 폴더 ${currentWorkspace.memoFolders.length + 1}`)?.trim();
         if (!name) return;
@@ -382,7 +411,7 @@ async function handleClick(event: MouseEvent): Promise<void> {
         const folderId = String(button.dataset.folderId || currentWorkspace.memoFolders[0]?.id || "");
         if (!getMemoFolder(folderId)) return;
         const uid = uuid();
-        currentWorkspace.memos.push({ uid, folderId, content: "", enabled: true, createdAt: Date.now() });
+        currentWorkspace.memos.push({ uid, folderId, displayName: "", content: "", enabled: true, createdAt: Date.now() });
         forgetMemoUiState([folderId], [uid]);
         await saveCurrentWorkspace();
         await saveSettings();
@@ -590,6 +619,16 @@ async function handleChange(event: Event): Promise<void> {
     const target = event.target as HTMLInputElement | HTMLSelectElement;
     const changeType = target.dataset.change;
     if (!changeType) return;
+    if (changeType === "regex-enabled") {
+        const script = settings.contextRegexScripts.find((item) => item.id === target.dataset.regexId);
+        if (!script) return;
+        script.enabled = (target as HTMLInputElement).checked;
+        if (!script.enabled) contextRegexErrors.delete(script.id);
+        await saveSettings();
+        scheduleRegexContextRefresh();
+        renderPreservingPanelScroll();
+        return;
+    }
     if (changeType === "room-select" && currentWorkspace) {
         if (!currentWorkspace.rooms.some((room) => room.id === target.value)) return;
         if (activeWriterRequest) await abandonActiveWriterRequest();

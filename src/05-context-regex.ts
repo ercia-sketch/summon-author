@@ -7,6 +7,7 @@ function validateContextRegexScripts(): CompiledContextRegex[] {
     contextRegexErrors.clear();
     const compiled: CompiledContextRegex[] = [];
     for (const script of settings.contextRegexScripts) {
+        if (!script.enabled) continue;
         if (!script.input) continue;
         try {
             compiled.push({ script, regex: new RegExp(script.input, "g") });

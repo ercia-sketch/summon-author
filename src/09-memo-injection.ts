@@ -167,8 +167,8 @@ async function reconcileMemoReceipts(state = memoReceiptState): Promise<boolean>
     if (!state || state !== memoReceiptState || !mainDocument) return false;
     try {
         const messageElement = await mainDocument.querySelector(`.risu-chat[data-chat-index="${state.userMessageIndex}"]`);
-        const contentElement = messageElement ? await messageElement.querySelector(":scope > div") : null;
-        if (!contentElement) return false;
+        const receiptHost = messageElement ? await messageElement.getParent() : null;
+        if (!receiptHost) return false;
         const identity = await resolveSessionIdentity();
         if (!identity || identity.characterId !== state.characterId || identity.chatId !== state.chatId || state !== memoReceiptState) return false;
 
@@ -194,20 +194,20 @@ async function reconcileMemoReceipts(state = memoReceiptState): Promise<boolean>
             await receipt.setAttribute("x-author-talk-memo-generation", String(state.generation));
             await receipt.setAttribute("x-author-talk-memo-id", memo.uid);
             await applySafeStyles(receipt, [
-                ["maxWidth", "760px"], ["margin", "8px 0 2px auto"], ["padding", "9px 11px"],
+                ["width", "calc(100% - 2rem)"], ["maxWidth", "calc(100% - 2rem)"], ["margin", "7px auto 2px"], ["padding", "10px 12px"],
                 ["border", "1px dashed rgba(121, 167, 255, .65)"], ["borderRadius", "9px"],
                 ["background", "rgba(30, 49, 80, .72)"], ["color", "inherit"], ["fontSize", "12px"],
-                ["lineHeight", "1.45"], ["boxSizing", "border-box"],
+                ["lineHeight", "1.45"], ["boxSizing", "border-box"], ["display", "block"],
             ]);
             const label = await mainDocument.createElement("div");
-            await label.setTextContent(`작가 메모 Memo(${memo.number}) · 이번 모델 요청에만 포함됨`);
+            await label.setTextContent(memo.displayName ? `${memo.displayName} · Memo(${memo.number})` : `Memo(${memo.number})`);
             await applySafeStyles(label, [["fontWeight", "700"], ["color", "#9fc0ff"], ["marginBottom", "5px"]]);
             const content = await mainDocument.createElement("div");
             await content.setTextContent(memo.content);
             await applySafeStyles(content, [["whiteSpace", "pre-wrap"], ["overflowWrap", "anywhere"], ["opacity", ".88"]]);
             await receipt.appendChild(label);
             await receipt.appendChild(content);
-            await contentElement.appendChild(receipt);
+            await receiptHost.appendChild(receipt);
             kept.add(memo.uid);
         }
         return true;
@@ -219,6 +219,22 @@ async function reconcileMemoReceipts(state = memoReceiptState): Promise<boolean>
 
 function ensureMemoReceiptsPresent(state = memoReceiptState): Promise<boolean> {
     return runMemoReceiptSync(() => reconcileMemoReceipts(state));
+}
+
+async function refreshMemoReceiptDisplayName(memo: Memo): Promise<void> {
+    const state = memoReceiptState;
+    const receiptMemo = state?.memos.find((item) => item.uid === memo.uid);
+    if (!state || !receiptMemo) return;
+    receiptMemo.displayName = memo.displayName.trim();
+    try {
+        await runMemoReceiptSync(async () => {
+            if (state !== memoReceiptState) return;
+            await removeVisualMemoReceipts();
+            await reconcileMemoReceipts(state);
+        });
+    } catch (error) {
+        console.warn("[Summon Author] Could not refresh the visual memo name:", error);
+    }
 }
 
 function scheduleMemoReceiptRepair(): void {
@@ -280,7 +296,7 @@ const memoReplacer = async (messages: any[], requestType: string): Promise<any[]
         const memos = activeMemos(workspace);
         const block = memoBlock(memos);
         if (!block) return messages;
-        const receiptMemos = memos.map((memo, index) => ({ uid: memo.uid, number: index + 1, content: memo.content.trim() }));
+        const receiptMemos = memos.map((memo, index) => ({ uid: memo.uid, number: index + 1, displayName: memo.displayName.trim(), content: memo.content.trim() }));
         const cloned = safeClone(messages);
         for (let index = cloned.length - 1; index >= 0; index--) {
             const message = cloned[index];

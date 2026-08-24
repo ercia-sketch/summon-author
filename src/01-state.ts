@@ -1,5 +1,5 @@
 const DEFAULT_SETTINGS: PluginSettings = {
-    version: 6,
+    version: 7,
     selectedBasePresetId: BUILTIN_BASE_ID,
     selectedAdditionalPresetId: BUILTIN_ADDITIONAL_ID,
     customBasePresets: [],
@@ -106,6 +106,7 @@ let memoReceiptSyncPromise: Promise<void> = Promise.resolve();
 interface VisualMemoReceiptItem {
     uid: string;
     number: number;
+    displayName: string;
     content: string;
 }
 let memoReceiptState: {

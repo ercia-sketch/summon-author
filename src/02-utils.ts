@@ -37,102 +37,114 @@ function renderPlainText(value: string): string {
     return escapeHtml(value).replace(/\n/g, "<br>");
 }
 
+async function copyTextToClipboard(value: string): Promise<void> {
+    if (navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(value);
+            return;
+        } catch {
+            // Fall back to a selection-based copy for restricted iframe contexts.
+        }
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    let copied = false;
+    try {
+        textarea.focus();
+        textarea.select();
+        copied = document.execCommand("copy");
+    } finally {
+        textarea.remove();
+    }
+    if (!copied) throw new Error("클립보드에 복사할 수 없습니다.");
+}
+
 function isSafeMarkdownLink(value: string): boolean {
     const link = value.trim().toLocaleLowerCase();
     return link.startsWith("https://") || link.startsWith("http://") || link.startsWith("mailto:") || link.startsWith("#");
 }
 
-function renderMarkdownInline(value: string): string {
-    const protectedHtml: string[] = [];
-    const protect = (html: string): string => {
-        const token = `\u0001${protectedHtml.length}\u0002`;
-        protectedHtml.push(html);
-        return token;
-    };
-    let working = value.replace(/`([^`\n]+)`/g, (_match, code: string) => protect(`<code>${escapeHtml(code)}</code>`));
-    working = working.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (match, label: string, href: string) => {
-        if (!isSafeMarkdownLink(href)) return match;
-        return protect(`<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`);
-    });
-    working = escapeHtml(working)
-        .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
-        .replace(/__([^_\n]+)__/g, "<strong>$1</strong>")
-        .replace(/~~([^~\n]+)~~/g, "<del>$1</del>")
-        .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>")
-        .replace(/(^|[^_])_([^_\n]+)_(?!_)/g, "$1<em>$2</em>");
-    return working.replace(/\u0001(\d+)\u0002/g, (_match, index: string) => protectedHtml[Number(index)] ?? "");
-}
+type MarkdownRenderRule = (tokens: any[], index: number, options: any, env: any, self: any) => string;
 
-function isMarkdownBlockStart(line: string): boolean {
-    return /^\s*```/.test(line)
-        || /^\s{0,3}#{1,6}\s+/.test(line)
-        || /^\s*>\s?/.test(line)
-        || /^\s*[-+*]\s+/.test(line)
-        || /^\s*\d+[.)]\s+/.test(line)
-        || /^\s*(?:---+|___+|\*\*\*+)\s*$/.test(line);
-}
+const markdownRenderer = summonAuthorMarkdownParser({
+    html: false,
+    linkify: true,
+    typographer: false,
+    breaks: false,
+});
+
+markdownRenderer.validateLink = isSafeMarkdownLink;
+
+markdownRenderer.core.ruler.after("inline", "summon_author_task_lists", (state: any): void => {
+    for (let index = 2; index < state.tokens.length; index++) {
+        const inlineToken = state.tokens[index];
+        const paragraphToken = state.tokens[index - 1];
+        const listItemToken = state.tokens[index - 2];
+        if (inlineToken.type !== "inline" || paragraphToken.type !== "paragraph_open" || listItemToken.type !== "list_item_open") continue;
+        const firstChild = inlineToken.children?.[0];
+        if (firstChild?.type !== "text") continue;
+        const taskMarker = firstChild.content.match(/^\[([ xX])\][ \t]+/);
+        if (!taskMarker) continue;
+
+        firstChild.content = firstChild.content.slice(taskMarker[0].length);
+        const checkbox = new state.Token("html_inline", "", 0);
+        checkbox.content = `<input class="md-task-checkbox" type="checkbox" disabled${taskMarker[1].toLowerCase() === "x" ? " checked" : ""}>`;
+        inlineToken.children.unshift(checkbox);
+        listItemToken.attrJoin("class", "md-task-list-item");
+
+        let closedListDepth = 0;
+        for (let parentIndex = index - 3; parentIndex >= 0; parentIndex--) {
+            const parentToken = state.tokens[parentIndex];
+            if (parentToken.type === "bullet_list_close" || parentToken.type === "ordered_list_close") {
+                closedListDepth++;
+                continue;
+            }
+            if (parentToken.type === "bullet_list_open" || parentToken.type === "ordered_list_open") {
+                if (closedListDepth > 0) {
+                    closedListDepth--;
+                    continue;
+                }
+                const classes = String(parentToken.attrGet("class") ?? "").split(/\s+/);
+                if (!classes.includes("md-task-list")) parentToken.attrJoin("class", "md-task-list");
+                break;
+            }
+        }
+    }
+});
+
+const defaultMarkdownLinkOpen: MarkdownRenderRule = markdownRenderer.renderer.rules.link_open
+    ?? ((tokens, index, options, _env, self) => self.renderToken(tokens, index, options));
+markdownRenderer.renderer.rules.link_open = (tokens: any[], index: number, options: any, env: any, self: any): string => {
+    tokens[index].attrSet("target", "_blank");
+    tokens[index].attrSet("rel", "noopener noreferrer");
+    return defaultMarkdownLinkOpen(tokens, index, options, env, self);
+};
+
+const defaultMarkdownImage: MarkdownRenderRule = markdownRenderer.renderer.rules.image;
+markdownRenderer.renderer.rules.image = (tokens: any[], index: number, options: any, env: any, self: any): string => {
+    tokens[index].attrSet("loading", "lazy");
+    tokens[index].attrSet("decoding", "async");
+    tokens[index].attrSet("referrerpolicy", "no-referrer");
+    return defaultMarkdownImage(tokens, index, options, env, self);
+};
+
+markdownRenderer.renderer.rules.fence = (tokens: any[], index: number): string => {
+    const token = tokens[index];
+    const language = String(token.info ?? "").trim().split(/\s+/)[0] ?? "";
+    const languageLabel = language ? `<span class="md-code-language">${escapeHtml(language)}</span>` : "";
+    return `<div class="md-code-wrap">${languageLabel}<pre class="md-code-block"><code>${escapeHtml(token.content)}</code></pre></div>`;
+};
+
+markdownRenderer.renderer.rules.code_block = (tokens: any[], index: number): string => {
+    return `<div class="md-code-wrap"><pre class="md-code-block"><code>${escapeHtml(tokens[index].content)}</code></pre></div>`;
+};
 
 function renderMarkdown(value: string): string {
-    const lines = value.replace(/\r\n?/g, "\n").split("\n");
-    const html: string[] = [];
-    let index = 0;
-    while (index < lines.length) {
-        const line = lines[index];
-        if (!line.trim()) {
-            index++;
-            continue;
-        }
-        const fence = line.match(/^\s*```\s*([^\s`]*)\s*$/);
-        if (fence) {
-            const code: string[] = [];
-            index++;
-            while (index < lines.length && !/^\s*```\s*$/.test(lines[index])) code.push(lines[index++]);
-            if (index < lines.length) index++;
-            const language = fence[1] ? `<span class="md-code-language">${escapeHtml(fence[1])}</span>` : "";
-            html.push(`<div class="md-code-wrap">${language}<pre class="md-code-block"><code>${escapeHtml(code.join("\n"))}</code></pre></div>`);
-            continue;
-        }
-        const heading = line.match(/^\s{0,3}(#{1,6})\s+(.+)$/);
-        if (heading) {
-            const level = heading[1].length;
-            html.push(`<h${level}>${renderMarkdownInline(heading[2])}</h${level}>`);
-            index++;
-            continue;
-        }
-        if (/^\s*(?:---+|___+|\*\*\*+)\s*$/.test(line)) {
-            html.push("<hr>");
-            index++;
-            continue;
-        }
-        if (/^\s*>\s?/.test(line)) {
-            const quoted: string[] = [];
-            while (index < lines.length && /^\s*>\s?/.test(lines[index])) quoted.push(lines[index++].replace(/^\s*>\s?/, ""));
-            html.push(`<blockquote>${quoted.map(renderMarkdownInline).join("<br>")}</blockquote>`);
-            continue;
-        }
-        const unordered = line.match(/^\s*[-+*]\s+(.+)$/);
-        const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
-        if (unordered || ordered) {
-            const orderedList = Boolean(ordered);
-            const items: string[] = [];
-            const pattern = orderedList ? /^\s*\d+[.)]\s+(.+)$/ : /^\s*[-+*]\s+(.+)$/;
-            while (index < lines.length) {
-                const item = lines[index].match(pattern);
-                if (!item) break;
-                items.push(`<li>${renderMarkdownInline(item[1])}</li>`);
-                index++;
-            }
-            const tag = orderedList ? "ol" : "ul";
-            html.push(`<${tag}>${items.join("")}</${tag}>`);
-            continue;
-        }
-        const paragraph: string[] = [];
-        while (index < lines.length && lines[index].trim() && (paragraph.length === 0 || !isMarkdownBlockStart(lines[index]))) {
-            paragraph.push(lines[index++]);
-        }
-        html.push(`<p>${paragraph.map(renderMarkdownInline).join("<br>")}</p>`);
-    }
-    return html.join("");
+    return markdownRenderer.render(value);
 }
 
 function cleanupWriterMarkdown(value: string): string {
