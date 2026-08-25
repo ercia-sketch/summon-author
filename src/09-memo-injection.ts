@@ -338,17 +338,27 @@ async function ensureMemoReplacer(): Promise<boolean> {
     }
 }
 
-async function requestInitialPermissions(): Promise<void> {
+async function requestInitialPermissions(): Promise<boolean> {
     try {
         const databaseGranted = await Risuai.requestPluginPermission("db");
-        const mainDomGranted = await ensureMainDocumentAccess();
-        const replacerGranted = await ensureMemoReplacer();
-        if (!databaseGranted || !mainDomGranted || !replacerGranted) {
-            setStatus("일부 권한이 거부되었습니다. 해당 기능은 권한을 허용할 때까지 제한됩니다.", "error", false);
+        if (!databaseGranted) {
+            setStatus("필수 권한이 모두 허용되지 않아 플러그인을 비활성화했습니다.", "error", false);
+            return false;
         }
+        const mainDomGranted = await ensureMainDocumentAccess();
+        if (!mainDomGranted) {
+            setStatus("필수 권한이 모두 허용되지 않아 플러그인을 비활성화했습니다.", "error", false);
+            return false;
+        }
+        const replacerGranted = await ensureMemoReplacer();
+        if (!replacerGranted) {
+            setStatus("필수 권한이 모두 허용되지 않아 플러그인을 비활성화했습니다.", "error", false);
+            return false;
+        }
+        return true;
     } catch (error) {
         console.warn("[Summon Author] Initial permission confirmation was unavailable:", error);
-        setStatus(`초기 권한 확인을 열지 못했습니다: ${errorMessage(error)}`, "error", false);
+        setStatus(`초기 권한 확인에 실패하여 플러그인을 비활성화했습니다: ${errorMessage(error)}`, "error", false);
+        return false;
     }
-    render();
 }

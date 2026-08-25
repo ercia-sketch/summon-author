@@ -1,4 +1,5 @@
 async function openWriterRoom(): Promise<void> {
+    if (!initialPermissionsGranted) return;
     const frameSnapshot = await prepareHostFrameDetection();
     await Risuai.showContainer("fullscreen");
     panelOpen = true;
@@ -42,15 +43,8 @@ async function initialize(): Promise<void> {
     await applyTheme();
     render();
 
-    await Risuai.registerButton({
-        name: PLUGIN_DISPLAY_NAME,
-        icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`,
-        iconType: "html",
-        location: "chat",
-        id: "author-talk-chat-menu",
-    }, openWriterRoom);
-
     await Risuai.onUnload(async () => {
+        initialPermissionsGranted = false;
         panelOpen = false;
         if (settingsSaveTimer !== undefined) window.clearTimeout(settingsSaveTimer);
         settingsSaveTimer = undefined;
@@ -92,7 +86,20 @@ async function initialize(): Promise<void> {
         }
     });
 
-    await requestInitialPermissions();
+    initialPermissionsGranted = await requestInitialPermissions();
+    if (!initialPermissionsGranted) {
+        console.warn("[Summon Author] Plugin disabled because all required permissions were not granted.");
+        return;
+    }
+
+    await Risuai.registerButton({
+        name: PLUGIN_DISPLAY_NAME,
+        icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`,
+        iconType: "html",
+        location: "chat",
+        id: "author-talk-chat-menu",
+    }, openWriterRoom);
+
     if (settingsLoadError) {
         setStatus(`설정을 읽지 못했습니다. 원본 보호를 위해 이번 실행에서는 설정 저장을 차단했습니다: ${errorMessage(settingsLoadError)}`, "error", false);
         render();

@@ -1,7 +1,7 @@
 //@name author_talk
-//@display-name ★작가 소환★ v1.1.2
+//@display-name ★작가 소환★ v1.1.3
 //@api 3.0
-//@version 1.1.2
+//@version 1.1.3
 
 declare const Risuai: any;
 declare const summonAuthorMarkdownParser: (options?: Record<string, unknown>) => any;
@@ -11,7 +11,7 @@ type LoreMode = "on" | "off" | "auto";
 type PromptKind = "base" | "additional";
 type WriterModelMode = "model" | "submodel";
 const DEFAULT_LORE_MODE: LoreMode = "auto";
-const PLUGIN_VERSION = "1.1.2";
+const PLUGIN_VERSION = "1.1.3";
 const PLUGIN_DISPLAY_NAME = "★작가 소환★";
 
 interface PromptPreset {

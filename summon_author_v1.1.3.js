@@ -1,7 +1,7 @@
 //@name author_talk
-//@display-name ★작가 소환★ v1.1.2
+//@display-name ★작가 소환★ v1.1.3
 //@api 3.0
-//@version 1.1.2
+//@version 1.1.3
 /*!
 Bundled third-party software licenses
 
@@ -178,7 +178,7 @@ const summonAuthorMarkdownParser = (() => {
     return bundledMarkdownParser;
 })();
 const DEFAULT_LORE_MODE = "auto";
-const PLUGIN_VERSION = "1.1.2";
+const PLUGIN_VERSION = "1.1.3";
 const PLUGIN_DISPLAY_NAME = "★작가 소환★";
 const PLUGIN_PREFIX = "author_talk:";
 const SETTINGS_KEY = `${PLUGIN_PREFIX}settings:v1`;
@@ -250,6 +250,7 @@ let statusKind = "info";
 let memoReplacerReady = false;
 let memoReplacerPermissionDenied = false;
 let mainDomPermissionDenied = false;
+let initialPermissionsGranted = false;
 let settingsSaveTimer;
 let workspaceSaveTimer;
 let workspaceSavePromise = Promise.resolve();
@@ -2918,17 +2919,27 @@ async function ensureMemoReplacer() {
 async function requestInitialPermissions() {
     try {
         const databaseGranted = await Risuai.requestPluginPermission("db");
-        const mainDomGranted = await ensureMainDocumentAccess();
-        const replacerGranted = await ensureMemoReplacer();
-        if (!databaseGranted || !mainDomGranted || !replacerGranted) {
-            setStatus("일부 권한이 거부되었습니다. 해당 기능은 권한을 허용할 때까지 제한됩니다.", "error", false);
+        if (!databaseGranted) {
+            setStatus("필수 권한이 모두 허용되지 않아 플러그인을 비활성화했습니다.", "error", false);
+            return false;
         }
+        const mainDomGranted = await ensureMainDocumentAccess();
+        if (!mainDomGranted) {
+            setStatus("필수 권한이 모두 허용되지 않아 플러그인을 비활성화했습니다.", "error", false);
+            return false;
+        }
+        const replacerGranted = await ensureMemoReplacer();
+        if (!replacerGranted) {
+            setStatus("필수 권한이 모두 허용되지 않아 플러그인을 비활성화했습니다.", "error", false);
+            return false;
+        }
+        return true;
     }
     catch (error) {
         console.warn("[Summon Author] Initial permission confirmation was unavailable:", error);
-        setStatus(`초기 권한 확인을 열지 못했습니다: ${errorMessage(error)}`, "error", false);
+        setStatus(`초기 권한 확인에 실패하여 플러그인을 비활성화했습니다: ${errorMessage(error)}`, "error", false);
+        return false;
     }
-    render();
 }
 function parseMemoActions(text) {
     const pattern = /<writer_memo_actions>\s*([\s\S]*?)\s*<\/writer_memo_actions>/g;
@@ -5217,6 +5228,9 @@ async function applyTheme() {
     }
 }
 const RESIZE_DIRECTIONS = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
+const PANEL_Z_INDEX = 40;
+const RESIZE_LAYER_Z_INDEX = 41;
+const RESIZE_SHIELD_Z_INDEX = 42;
 function resizeCursor(direction) {
     if (direction === "n" || direction === "s")
         return "ns-resize";
@@ -5229,7 +5243,7 @@ function panelFrameGeometryStyle(geometry, minimized = panelMinimized) {
         ? ["min-height:64px", "max-height:64px"]
         : ["min-height:min(320px, calc(100vh - 16px))", "max-height:calc(100vh - 8px)"];
     return [
-        "position:fixed", "display:block", "z-index:1000", "right:auto",
+        "position:fixed", "display:block", `z-index:${PANEL_Z_INDEX}`, "right:auto",
         `left:${Math.round(geometry.left)}px`, `top:${Math.round(geometry.top)}px`,
         `width:${Math.round(geometry.width)}px`, `height:${Math.round(geometry.height)}px`,
         "min-width:min(420px, calc(100vw - 16px))", ...heightConstraints,
@@ -5320,11 +5334,11 @@ async function ensureParentResizeHandles() {
         return;
     parentResizeLayer = await mainDocument.createElement("div");
     await parentResizeLayer.setAttribute("x-author-talk-resize-layer", "true");
-    await parentResizeLayer.setStyleAttribute("position:fixed;inset:0;z-index:1002;pointer-events:none;display:block");
+    await parentResizeLayer.setStyleAttribute(`position:fixed;inset:0;z-index:${RESIZE_LAYER_Z_INDEX};pointer-events:none;display:block`);
     await parentBody.appendChild(parentResizeLayer);
     parentResizeShield = await mainDocument.createElement("div");
     await parentResizeShield.setAttribute("x-author-talk-resize-shield", "true");
-    await parentResizeShield.setStyleAttribute("position:fixed;inset:0;z-index:1003;display:none;pointer-events:auto;touch-action:none;user-select:none;background:transparent");
+    await parentResizeShield.setStyleAttribute(`position:fixed;inset:0;z-index:${RESIZE_SHIELD_Z_INDEX};display:none;pointer-events:auto;touch-action:none;user-select:none;background:transparent`);
     await parentBody.appendChild(parentResizeShield);
     for (const direction of RESIZE_DIRECTIONS) {
         const handle = await mainDocument.createElement("div");
@@ -5350,7 +5364,7 @@ async function hideParentResizeHandles() {
 async function showParentResizeShield(direction) {
     if (!parentResizeShield)
         return;
-    await parentResizeShield.setStyleAttribute(`position:fixed;inset:0;z-index:1003;display:block;pointer-events:auto;touch-action:none;user-select:none;background:transparent;cursor:${resizeCursor(direction)}`);
+    await parentResizeShield.setStyleAttribute(`position:fixed;inset:0;z-index:${RESIZE_SHIELD_Z_INDEX};display:block;pointer-events:auto;touch-action:none;user-select:none;background:transparent;cursor:${resizeCursor(direction)}`);
 }
 async function hideParentResizeShield() {
     if (parentResizeShield)
@@ -5486,6 +5500,7 @@ async function findAndConfigureHostFrame(snapshot) {
             throw new Error("플러그인 iframe을 찾지 못했습니다.");
         const styles = [
             ["left", "auto"], ["right", "16px"], ["top", "16px"],
+            ["zIndex", String(PANEL_Z_INDEX)],
             ["width", "min(760px, calc(100vw - 32px))"], ["height", "calc(100vh - 32px)"],
             ["minWidth", "min(420px, calc(100vw - 16px))"], ["minHeight", "320px"],
             ["maxWidth", "calc(100vw - 8px)"], ["maxHeight", "calc(100vh - 8px)"],
@@ -5689,6 +5704,8 @@ async function finishPanelResize(event) {
     return resizeFinishPromise;
 }
 async function openWriterRoom() {
+    if (!initialPermissionsGranted)
+        return;
     const frameSnapshot = await prepareHostFrameDetection();
     await Risuai.showContainer("fullscreen");
     panelOpen = true;
@@ -5733,14 +5750,8 @@ async function initialize() {
     root.addEventListener("pointercancel", endPanelDrag);
     await applyTheme();
     render();
-    await Risuai.registerButton({
-        name: PLUGIN_DISPLAY_NAME,
-        icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`,
-        iconType: "html",
-        location: "chat",
-        id: "author-talk-chat-menu",
-    }, openWriterRoom);
     await Risuai.onUnload(async () => {
+        initialPermissionsGranted = false;
         panelOpen = false;
         if (settingsSaveTimer !== undefined)
             window.clearTimeout(settingsSaveTimer);
@@ -5790,7 +5801,18 @@ async function initialize() {
                 console.error("[Summon Author] Save failed during unload:", result.reason);
         }
     });
-    await requestInitialPermissions();
+    initialPermissionsGranted = await requestInitialPermissions();
+    if (!initialPermissionsGranted) {
+        console.warn("[Summon Author] Plugin disabled because all required permissions were not granted.");
+        return;
+    }
+    await Risuai.registerButton({
+        name: PLUGIN_DISPLAY_NAME,
+        icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`,
+        iconType: "html",
+        location: "chat",
+        id: "author-talk-chat-menu",
+    }, openWriterRoom);
     if (settingsLoadError) {
         setStatus(`설정을 읽지 못했습니다. 원본 보호를 위해 이번 실행에서는 설정 저장을 차단했습니다: ${errorMessage(settingsLoadError)}`, "error", false);
         render();

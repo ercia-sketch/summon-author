@@ -11,7 +11,7 @@ if (configFile.error) {
 }
 
 const parsedConfig = ts.parseJsonConfigFileContent(configFile.config, ts.sys, projectRoot, undefined, configPath);
-const outputPath = path.resolve(parsedConfig.options.outFile ?? path.join(projectRoot, "summon_author_v1.1.2.js"));
+const outputPath = path.resolve(parsedConfig.options.outFile ?? path.join(projectRoot, "summon_author_v1.1.3.js"));
 let pluginSource = "";
 const compilerHost = ts.createCompilerHost(parsedConfig.options);
 compilerHost.writeFile = (fileName, content) => {

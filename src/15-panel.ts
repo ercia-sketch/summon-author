@@ -8,6 +8,9 @@ async function applyTheme(): Promise<void> {
 }
 
 const RESIZE_DIRECTIONS: ResizeDirection[] = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
+const PANEL_Z_INDEX = 40;
+const RESIZE_LAYER_Z_INDEX = 41;
+const RESIZE_SHIELD_Z_INDEX = 42;
 
 function resizeCursor(direction: ResizeDirection): string {
     if (direction === "n" || direction === "s") return "ns-resize";
@@ -20,7 +23,7 @@ function panelFrameGeometryStyle(geometry: PanelGeometry, minimized = panelMinim
         ? ["min-height:64px", "max-height:64px"]
         : ["min-height:min(320px, calc(100vh - 16px))", "max-height:calc(100vh - 8px)"];
     return [
-        "position:fixed", "display:block", "z-index:1000", "right:auto",
+        "position:fixed", "display:block", `z-index:${PANEL_Z_INDEX}`, "right:auto",
         `left:${Math.round(geometry.left)}px`, `top:${Math.round(geometry.top)}px`,
         `width:${Math.round(geometry.width)}px`, `height:${Math.round(geometry.height)}px`,
         "min-width:min(420px, calc(100vw - 16px))", ...heightConstraints,
@@ -99,11 +102,11 @@ async function ensureParentResizeHandles(): Promise<void> {
     if (!parentBody) return;
     parentResizeLayer = await mainDocument.createElement("div");
     await parentResizeLayer.setAttribute("x-author-talk-resize-layer", "true");
-    await parentResizeLayer.setStyleAttribute("position:fixed;inset:0;z-index:1002;pointer-events:none;display:block");
+    await parentResizeLayer.setStyleAttribute(`position:fixed;inset:0;z-index:${RESIZE_LAYER_Z_INDEX};pointer-events:none;display:block`);
     await parentBody.appendChild(parentResizeLayer);
     parentResizeShield = await mainDocument.createElement("div");
     await parentResizeShield.setAttribute("x-author-talk-resize-shield", "true");
-    await parentResizeShield.setStyleAttribute("position:fixed;inset:0;z-index:1003;display:none;pointer-events:auto;touch-action:none;user-select:none;background:transparent");
+    await parentResizeShield.setStyleAttribute(`position:fixed;inset:0;z-index:${RESIZE_SHIELD_Z_INDEX};display:none;pointer-events:auto;touch-action:none;user-select:none;background:transparent`);
     await parentBody.appendChild(parentResizeShield);
     for (const direction of RESIZE_DIRECTIONS) {
         const handle = await mainDocument.createElement("div");
@@ -128,7 +131,7 @@ async function hideParentResizeHandles(): Promise<void> {
 
 async function showParentResizeShield(direction: ResizeDirection): Promise<void> {
     if (!parentResizeShield) return;
-    await parentResizeShield.setStyleAttribute(`position:fixed;inset:0;z-index:1003;display:block;pointer-events:auto;touch-action:none;user-select:none;background:transparent;cursor:${resizeCursor(direction)}`);
+    await parentResizeShield.setStyleAttribute(`position:fixed;inset:0;z-index:${RESIZE_SHIELD_Z_INDEX};display:block;pointer-events:auto;touch-action:none;user-select:none;background:transparent;cursor:${resizeCursor(direction)}`);
 }
 
 async function hideParentResizeShield(): Promise<void> {
@@ -253,6 +256,7 @@ async function findAndConfigureHostFrame(snapshot: Array<{ frame: any; display: 
         if (!hostFrame) throw new Error("플러그인 iframe을 찾지 못했습니다.");
         const styles: Array<[string, string]> = [
             ["left", "auto"], ["right", "16px"], ["top", "16px"],
+            ["zIndex", String(PANEL_Z_INDEX)],
             ["width", "min(760px, calc(100vw - 32px))"], ["height", "calc(100vh - 32px)"],
             ["minWidth", "min(420px, calc(100vw - 16px))"], ["minHeight", "320px"],
             ["maxWidth", "calc(100vw - 8px)"], ["maxHeight", "calc(100vh - 8px)"],
