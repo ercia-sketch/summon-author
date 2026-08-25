@@ -29,6 +29,7 @@ let statusKind: "info" | "success" | "error" = "info";
 let memoReplacerReady = false;
 let memoReplacerPermissionDenied = false;
 let mainDomPermissionDenied = false;
+let initialPermissionsGranted = false;
 let settingsSaveTimer: number | undefined;
 let workspaceSaveTimer: number | undefined;
 let workspaceSavePromise: Promise<void> = Promise.resolve();

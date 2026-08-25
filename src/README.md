@@ -1,6 +1,6 @@
 # 소스 코드 안내
 
-이 폴더의 TypeScript 파일들이 플러그인의 개발 원본입니다. `npm run build`를 실행하면 파일들이 `tsconfig.json`에 적힌 순서대로 합쳐지고 `markdown-it` 브라우저 빌드가 포함되어, 루트의 단일 배포 파일 `summon_author_v1.1.2.js`가 됩니다.
+이 폴더의 TypeScript 파일들이 플러그인의 개발 원본입니다. `npm run build`를 실행하면 파일들이 `tsconfig.json`에 적힌 순서대로 합쳐지고 `markdown-it` 브라우저 빌드가 포함되어, 루트의 단일 배포 파일 `summon_author_v1.1.3.js`가 됩니다.
 
 ## 파일별 역할
 
@@ -24,7 +24,7 @@
 
 ## 편집 규칙
 
-- 배포용 `summon_author_v1.1.2.js`는 직접 수정하지 않습니다.
+- 배포용 `summon_author_v1.1.3.js`는 직접 수정하지 않습니다.
 - 기능에 맞는 `src` 파일을 수정한 뒤 `npm run check`, `npm run build`, `npm run test:built`를 실행합니다.
 - 이 파일들은 하나의 전역 스크립트로 합쳐지므로 현재 구조에서는 `import`나 `export`를 추가하지 않습니다.
 - 마크다운 라이브러리 조립과 제3자 라이선스 포함은 `scripts/build.cjs`에서 처리합니다.

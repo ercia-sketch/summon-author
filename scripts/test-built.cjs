@@ -2,18 +2,24 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const artifactPath = path.join(__dirname, "..", "summon_author_v1.1.2.js");
+(async () => {
+const artifactPath = path.join(__dirname, "..", "summon_author_v1.1.3.js");
 const source = fs.readFileSync(artifactPath, "utf8");
 const initializeMarker = source.lastIndexOf("void initialize()");
 assert.notEqual(initializeMarker, -1, "plugin initializer marker must exist");
 
-const previousGlobalMarkdownParser = globalThis.markdownit;
-const globalMarkdownParserSentinel = () => "기존 전역 값";
-globalThis.markdownit = globalMarkdownParserSentinel;
-const api = new Function(`${source.slice(0, initializeMarker)}\nreturn { renderMarkdown, normalizeContextRegexScript, normalizeWorkspace, memoBlock, orderedMemos, reorderMemoWithinFolder, renderMemoTitleLine, compileRegexScripts: (scripts) => { settings.contextRegexScripts = scripts; return validateContextRegexScripts(); } };`)();
-assert.equal(globalThis.markdownit, globalMarkdownParserSentinel);
-if (previousGlobalMarkdownParser === undefined) delete globalThis.markdownit;
-else globalThis.markdownit = previousGlobalMarkdownParser;
+function loadArtifactApi(risuai = {}) {
+    const previousGlobalMarkdownParser = globalThis.markdownit;
+    const globalMarkdownParserSentinel = () => "기존 전역 값";
+    globalThis.markdownit = globalMarkdownParserSentinel;
+    const api = new Function("Risuai", `${source.slice(0, initializeMarker)}\nreturn { renderMarkdown, normalizeContextRegexScript, normalizeWorkspace, memoBlock, orderedMemos, reorderMemoWithinFolder, renderMemoTitleLine, requestInitialPermissions, PANEL_Z_INDEX, RESIZE_LAYER_Z_INDEX, RESIZE_SHIELD_Z_INDEX, compileRegexScripts: (scripts) => { settings.contextRegexScripts = scripts; return validateContextRegexScripts(); } };`)(risuai);
+    assert.equal(globalThis.markdownit, globalMarkdownParserSentinel);
+    if (previousGlobalMarkdownParser === undefined) delete globalThis.markdownit;
+    else globalThis.markdownit = previousGlobalMarkdownParser;
+    return api;
+}
+
+const api = loadArtifactApi();
 
 const numbered = api.renderMarkdown("1. 첫 문장\n\n2. 둘째 문장\n\n3. 셋째 문장");
 assert.equal((numbered.match(/<ol(?:\s|>)/g) ?? []).length, 1);
@@ -86,4 +92,59 @@ assert.doesNotMatch(source, />\s*메모 ON<\/label>/);
 assert.doesNotMatch(source, />\s*폴더 ON<\/label>/);
 assert.doesNotMatch(source, /이번 모델 요청에만 포함됨/);
 
+const permissionCheckIndex = source.indexOf("initialPermissionsGranted = await requestInitialPermissions()");
+const buttonRegistrationIndex = source.indexOf("await Risuai.registerButton");
+assert.notEqual(permissionCheckIndex, -1);
+assert.notEqual(buttonRegistrationIndex, -1);
+assert.ok(permissionCheckIndex < buttonRegistrationIndex, "permission confirmation must finish before the launch button is registered");
+assert.match(source, /if \(!initialPermissionsGranted\)\s*return;/);
+assert.equal(api.PANEL_Z_INDEX, 40);
+assert.equal(api.RESIZE_LAYER_Z_INDEX, 41);
+assert.equal(api.RESIZE_SHIELD_Z_INDEX, 42);
+assert.ok(api.RESIZE_SHIELD_Z_INDEX < 50, "all plugin layers must stay below RisuAI permission dialogs");
+
+const grantedCalls = [];
+const grantedApi = loadArtifactApi({
+    requestPluginPermission: async (permission) => {
+        grantedCalls.push(permission);
+        return true;
+    },
+    getRootDocument: async () => ({}),
+    addRisuReplacer: async () => undefined,
+});
+assert.equal(await grantedApi.requestInitialPermissions(), true);
+assert.deepEqual(grantedCalls, ["db", "mainDom", "replacer"]);
+
+const requiredPermissions = ["db", "mainDom", "replacer"];
+for (const deniedPermission of requiredPermissions) {
+    const deniedCalls = [];
+    const deniedApi = loadArtifactApi({
+        requestPluginPermission: async (permission) => {
+            deniedCalls.push(permission);
+            return permission !== deniedPermission;
+        },
+        getRootDocument: async () => ({}),
+        addRisuReplacer: async () => undefined,
+    });
+    assert.equal(await deniedApi.requestInitialPermissions(), false);
+    assert.deepEqual(deniedCalls, requiredPermissions.slice(0, requiredPermissions.indexOf(deniedPermission) + 1));
+}
+
+const failedApi = loadArtifactApi({
+    requestPluginPermission: async () => {
+        throw new Error("permission unavailable");
+    },
+});
+const originalWarn = console.warn;
+console.warn = () => undefined;
+try {
+    assert.equal(await failedApi.requestInitialPermissions(), false);
+} finally {
+    console.warn = originalWarn;
+}
+
 console.log("Built artifact regression checks passed.");
+})().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+});
