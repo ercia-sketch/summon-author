@@ -362,6 +362,15 @@ async function handleClick(event: MouseEvent): Promise<void> {
         renderPreservingPanelScroll();
         return;
     }
+    if (action === "set-memo-placement" && currentWorkspace) {
+        const memo = currentWorkspace.memos.find((item) => item.uid === button.dataset.memoUid);
+        const placement = button.dataset.memoPlacement;
+        if (!memo || (placement !== "input" && placement !== "prompt-end") || memo.placement === placement) return;
+        memo.placement = placement;
+        await saveCurrentWorkspace();
+        renderPreservingPanelScroll();
+        return;
+    }
     if (action === "rename-memo" && currentWorkspace) {
         const memo = currentWorkspace.memos.find((item) => item.uid === button.dataset.memoUid);
         if (!memo) return;
@@ -411,7 +420,7 @@ async function handleClick(event: MouseEvent): Promise<void> {
         const folderId = String(button.dataset.folderId || currentWorkspace.memoFolders[0]?.id || "");
         if (!getMemoFolder(folderId)) return;
         const uid = uuid();
-        currentWorkspace.memos.push({ uid, folderId, displayName: "", content: "", enabled: true, createdAt: Date.now() });
+        currentWorkspace.memos.push({ uid, folderId, displayName: "", content: "", enabled: true, placement: "input", createdAt: Date.now() });
         forgetMemoUiState([folderId], [uid]);
         await saveCurrentWorkspace();
         await saveSettings();

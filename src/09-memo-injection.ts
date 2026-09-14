@@ -1,8 +1,29 @@
-function memoBlock(memos: Memo[]): string {
+function memoBlock(memos: Memo[], numberingMemos: Memo[] = memos): string {
+    const numberByUid = new Map(numberingMemos
+        .filter((memo) => memo.content.trim())
+        .map((memo, index): [string, number] => [memo.uid, index + 1]));
     return memos
         .filter((memo) => memo.content.trim())
-        .map((memo, index) => `(Memo(${index + 1}): ${memo.content.trim()})`)
+        .map((memo) => `(Memo(${numberByUid.get(memo.uid) ?? 1}): ${memo.content.trim()})`)
         .join("\n");
+}
+
+function appendMemoBlocks(messages: any[], inputBlock: string, promptEndBlock: string): { messages: any[]; latestUserIndex: number } {
+    const cloned = safeClone(messages);
+    let latestUserIndex = -1;
+    for (let index = cloned.length - 1; index >= 0; index--) {
+        if (cloned[index]?.role === "user" && typeof cloned[index].content === "string") {
+            latestUserIndex = index;
+            break;
+        }
+    }
+    if (inputBlock && latestUserIndex >= 0 && !cloned[latestUserIndex].content.endsWith(inputBlock)) {
+        cloned[latestUserIndex].content = `${cloned[latestUserIndex].content}\n\n${inputBlock}`;
+    }
+    if (promptEndBlock && !cloned.some((message: any) => message?.role === "system" && message.content === promptEndBlock)) {
+        cloned.push({ role: "system", content: promptEndBlock });
+    }
+    return { messages: cloned, latestUserIndex };
 }
 
 function normalizedComparableText(value: unknown): string {
@@ -294,24 +315,21 @@ const memoReplacer = async (messages: any[], requestType: string): Promise<any[]
         await clearMemoReceipt();
         const workspace = await loadWorkspace();
         const memos = activeMemos(workspace);
-        const block = memoBlock(memos);
-        if (!block) return messages;
+        const inputBlock = memoBlock(memos.filter((memo) => memo.placement === "input"), memos);
+        const promptEndBlock = memoBlock(memos.filter((memo) => memo.placement === "prompt-end"), memos);
+        if (!inputBlock && !promptEndBlock) return messages;
         const receiptMemos = memos.map((memo, index) => ({ uid: memo.uid, number: index + 1, displayName: memo.displayName.trim(), content: memo.content.trim() }));
-        const cloned = safeClone(messages);
-        for (let index = cloned.length - 1; index >= 0; index--) {
-            const message = cloned[index];
-            if (message?.role !== "user" || typeof message.content !== "string") continue;
+        const { messages: cloned, latestUserIndex } = appendMemoBlocks(messages, inputBlock, promptEndBlock);
+        if (latestUserIndex >= 0) {
             try {
-                const triggeredLore = await buildMemoTriggeredLoreBlock(identity, workspace, cloned);
-                if (triggeredLore) cloned.splice(index, 0, { role: "system", content: triggeredLore });
+                const triggeredLore = await buildMemoTriggeredLoreBlock(identity, workspace, messages);
+                if (triggeredLore) cloned.splice(latestUserIndex, 0, { role: "system", content: triggeredLore });
             } catch (error) {
                 console.warn("[Summon Author] Memo-triggered lorebook supplementation was skipped:", error);
             }
-            if (!message.content.endsWith(block)) message.content = `${message.content}\n\n${block}`;
-            void displayMemoReceipts(identity, receiptMemos);
-            return cloned;
         }
-        return messages;
+        void displayMemoReceipts(identity, receiptMemos);
+        return cloned;
     } catch (error) {
         console.error("[Summon Author] Memo injection failed safely; returning the original request.", error);
         return messages;

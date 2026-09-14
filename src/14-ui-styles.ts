@@ -145,7 +145,12 @@ function installStyles(): void {
         .memo-display-name-empty { color:var(--at-muted); font-weight:600; }
         .memo-sequence { flex:none; color:var(--at-muted); font-size:11px; font-weight:650; }
         .memo-sequence-only { color:var(--at-text); font-size:12px; }
-        .memo-heading-actions { flex:none; flex-wrap:wrap; justify-content:flex-end; }
+        .memo-heading-actions { flex:none; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+        .memo-placement-picker { display:flex; flex-direction:column; flex:none; overflow:hidden; border:1px solid var(--at-border); border-radius:7px; background:#101827; }
+        .memo-placement-button { min-width:86px; padding:4px 8px; border:0; border-radius:0; background:transparent; color:var(--at-muted); font-size:10px; line-height:1.2; white-space:nowrap; }
+        .memo-placement-button + .memo-placement-button { border-top:1px solid var(--at-border); }
+        .memo-placement-button.selected { background:rgba(49,130,246,.22); color:#9dc8ff; box-shadow:inset 3px 0 0 var(--at-accent); }
+        .memo-placement-button:hover { background:rgba(49,130,246,.14); color:var(--at-text); }
         .memo-collapse-heading { margin:-4px 0; }
         .memo-expanded-body { flex:1; min-height:0; display:flex; flex-direction:column; }
         .memo-content-editor { flex:1; min-height:240px; margin:14px 0 12px; padding:16px; border-color:var(--at-border); background:#111b2b; color:var(--at-muted); font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:13px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; resize:none; }
@@ -254,7 +259,7 @@ function installStyles(): void {
             .folder-heading { align-items:flex-start; flex-direction:column; }
             .folder-actions { width:100%; justify-content:flex-start; }
             .memo-card-heading { align-items:stretch; flex-direction:column; }
-            .memo-heading-actions { width:100%; justify-content:flex-end; }
+            .memo-heading-actions { width:100%; justify-content:flex-start; }
             .preset-editor > .row.between { align-items:flex-start; flex-direction:column; }
             .chat-context-message-heading { align-items:flex-start; flex-direction:column; }
             .chat-message-controls { width:100%; justify-content:space-between; }

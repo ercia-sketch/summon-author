@@ -1,7 +1,7 @@
 //@name author_talk
-//@display-name ★작가 소환★ v1.1.4
+//@display-name ★작가 소환★ v1.1.5
 //@api 3.0
-//@version 1.1.4
+//@version 1.1.5
 /*!
 Bundled third-party software licenses
 
@@ -178,7 +178,7 @@ const summonAuthorMarkdownParser = (() => {
     return bundledMarkdownParser;
 })();
 const DEFAULT_LORE_MODE = "auto";
-const PLUGIN_VERSION = "1.1.4";
+const PLUGIN_VERSION = "1.1.5";
 const PLUGIN_DISPLAY_NAME = "★작가 소환★";
 const PLUGIN_PREFIX = "author_talk:";
 const SETTINGS_KEY = `${PLUGIN_PREFIX}settings:v1`;
@@ -655,6 +655,7 @@ function normalizeWriterMessage(value, memoFolderId) {
             displayName: typeof memo.displayName === "string" ? memo.displayName : "",
             content: memo.content,
             enabled: memo.enabled !== false,
+            placement: memo.placement === "prompt-end" ? "prompt-end" : "input",
             createdAt: typeof memo.createdAt === "number" ? memo.createdAt : Date.now(),
         };
     };
@@ -707,7 +708,7 @@ function createEmptyWorkspace() {
     const roomId = uuid();
     const folderId = uuid();
     return {
-        version: 4,
+        version: 5,
         rooms: [{ id: roomId, name: "회의실 1", writerMessages: [], createdAt: Date.now() }],
         selectedRoomId: roomId,
         memoFolders: [{ id: folderId, name: "기본 메모", enabled: true, createdAt: Date.now() }],
@@ -755,11 +756,12 @@ function normalizeWorkspace(value) {
             displayName: typeof memo.displayName === "string" ? memo.displayName : "",
             content: memo.content,
             enabled: memo.enabled !== false,
+            placement: memo.placement === "prompt-end" ? "prompt-end" : "input",
             createdAt: typeof memo.createdAt === "number" ? memo.createdAt : Date.now() + index,
         }))
         : [];
     return {
-        version: 4,
+        version: 5,
         rooms,
         selectedRoomId: rooms.some((room) => room.id === value.selectedRoomId) ? value.selectedRoomId : rooms[0].id,
         memoFolders,
@@ -818,7 +820,7 @@ async function migrateLegacyWorkspace(characterId, currentChatId) {
             for (const memo of legacy.memos) {
                 if (!memo || typeof memo.content !== "string")
                     continue;
-                workspace.memos.push({ uid: uuid(), folderId, displayName: "", content: memo.content, enabled: memo.enabled !== false, createdAt: Date.now() + workspace.memos.length });
+                workspace.memos.push({ uid: uuid(), folderId, displayName: "", content: memo.content, enabled: memo.enabled !== false, placement: "input", createdAt: Date.now() + workspace.memos.length });
             }
         }
         if (legacy.loreOverrides && typeof legacy.loreOverrides === "object") {
@@ -834,7 +836,7 @@ async function migrateLegacyWorkspace(characterId, currentChatId) {
     return { workspace: normalizeWorkspace(workspace), loreOverrides };
 }
 function emptyMigrationWorkspace() {
-    return { version: 4, rooms: [], selectedRoomId: "", memoFolders: [], memos: [] };
+    return { version: 5, rooms: [], selectedRoomId: "", memoFolders: [], memos: [] };
 }
 function mergeWorkspace(target, source) {
     const targetWasEmpty = target.rooms.length === 0;
@@ -947,7 +949,7 @@ async function loadWorkspace() {
         workspaceLoadPromise = (async () => {
             const stored = await readStoredJson(GLOBAL_WORKSPACE_KEY, null);
             const workspace = stored ? normalizeWorkspace(stored) : await migrateGlobalWorkspace();
-            if (!stored || stored.version !== 4)
+            if (!stored || stored.version !== 5)
                 await writeStoredJson(GLOBAL_WORKSPACE_KEY, workspace);
             return workspace;
         })();
@@ -2636,11 +2638,31 @@ async function refreshContext() {
         render();
     }
 }
-function memoBlock(memos) {
+function memoBlock(memos, numberingMemos = memos) {
+    const numberByUid = new Map(numberingMemos
+        .filter((memo) => memo.content.trim())
+        .map((memo, index) => [memo.uid, index + 1]));
     return memos
         .filter((memo) => memo.content.trim())
-        .map((memo, index) => `(Memo(${index + 1}): ${memo.content.trim()})`)
+        .map((memo) => `(Memo(${numberByUid.get(memo.uid) ?? 1}): ${memo.content.trim()})`)
         .join("\n");
+}
+function appendMemoBlocks(messages, inputBlock, promptEndBlock) {
+    const cloned = safeClone(messages);
+    let latestUserIndex = -1;
+    for (let index = cloned.length - 1; index >= 0; index--) {
+        if (cloned[index]?.role === "user" && typeof cloned[index].content === "string") {
+            latestUserIndex = index;
+            break;
+        }
+    }
+    if (inputBlock && latestUserIndex >= 0 && !cloned[latestUserIndex].content.endsWith(inputBlock)) {
+        cloned[latestUserIndex].content = `${cloned[latestUserIndex].content}\n\n${inputBlock}`;
+    }
+    if (promptEndBlock && !cloned.some((message) => message?.role === "system" && message.content === promptEndBlock)) {
+        cloned.push({ role: "system", content: promptEndBlock });
+    }
+    return { messages: cloned, latestUserIndex };
 }
 function normalizedComparableText(value) {
     return typeof value === "string" ? value.replace(/\s+/gu, " ").trim().toLocaleLowerCase() : "";
@@ -2946,29 +2968,24 @@ const memoReplacer = async (messages, requestType) => {
         await clearMemoReceipt();
         const workspace = await loadWorkspace();
         const memos = activeMemos(workspace);
-        const block = memoBlock(memos);
-        if (!block)
+        const inputBlock = memoBlock(memos.filter((memo) => memo.placement === "input"), memos);
+        const promptEndBlock = memoBlock(memos.filter((memo) => memo.placement === "prompt-end"), memos);
+        if (!inputBlock && !promptEndBlock)
             return messages;
         const receiptMemos = memos.map((memo, index) => ({ uid: memo.uid, number: index + 1, displayName: memo.displayName.trim(), content: memo.content.trim() }));
-        const cloned = safeClone(messages);
-        for (let index = cloned.length - 1; index >= 0; index--) {
-            const message = cloned[index];
-            if (message?.role !== "user" || typeof message.content !== "string")
-                continue;
+        const { messages: cloned, latestUserIndex } = appendMemoBlocks(messages, inputBlock, promptEndBlock);
+        if (latestUserIndex >= 0) {
             try {
-                const triggeredLore = await buildMemoTriggeredLoreBlock(identity, workspace, cloned);
+                const triggeredLore = await buildMemoTriggeredLoreBlock(identity, workspace, messages);
                 if (triggeredLore)
-                    cloned.splice(index, 0, { role: "system", content: triggeredLore });
+                    cloned.splice(latestUserIndex, 0, { role: "system", content: triggeredLore });
             }
             catch (error) {
                 console.warn("[Summon Author] Memo-triggered lorebook supplementation was skipped:", error);
             }
-            if (!message.content.endsWith(block))
-                message.content = `${message.content}\n\n${block}`;
-            void displayMemoReceipts(identity, receiptMemos);
-            return cloned;
         }
-        return messages;
+        void displayMemoReceipts(identity, receiptMemos);
+        return cloned;
     }
     catch (error) {
         console.error("[Summon Author] Memo injection failed safely; returning the original request.", error);
@@ -3067,6 +3084,7 @@ function memoEquals(left, right) {
         && left.displayName === right.displayName
         && left.content === right.content
         && left.enabled === right.enabled
+        && left.placement === right.placement
         && left.createdAt === right.createdAt;
 }
 function memoFolderEquals(left, right) {
@@ -3116,7 +3134,7 @@ async function applyMemoActions(messageId) {
         }
         for (const action of message.pendingActions) {
             if (action.operation === "create") {
-                nextMemos.push({ uid: uuid(), folderId: writerFolderId, displayName: "", content: action.content, enabled: true, createdAt: Date.now() + nextMemos.length });
+                nextMemos.push({ uid: uuid(), folderId: writerFolderId, displayName: "", content: action.content, enabled: true, placement: "input", createdAt: Date.now() + nextMemos.length });
                 continue;
             }
             const targetUid = action.id ? numberMap[String(action.id)] : undefined;
@@ -3638,7 +3656,8 @@ function renderMemosTab() {
             const titleLine = renderMemoTitleLine(memo, number);
             const uid = escapeHtml(memo.uid);
             const collapsed = isMemoCollapsed(memo.uid);
-            return `<article class="memo-card ${effective ? "effective" : "suppressed"} ${collapsed ? "collapsed" : "expanded"}" data-memo-card="${uid}" data-reorder-card="memo" data-reorder-id="${uid}" data-reorder-scope="${escapeHtml(folder.id)}"><div class="reorder-handle-column" draggable="true" data-reorder-kind="memo" data-reorder-id="${uid}" data-reorder-scope="${escapeHtml(folder.id)}" title="같은 폴더 안에서 메모 순서 변경" aria-label="같은 폴더 안에서 메모 순서 변경">${reorderGripIcon()}</div><div class="reorder-card-content memo-card-content"><div class="memo-card-heading"><button data-action="toggle-memo" data-memo-uid="${uid}" class="collapse-heading memo-collapse-heading" aria-expanded="${collapsed ? "false" : "true"}"><span class="collapse-icon" aria-hidden="true">${collapsed ? "▸" : "▾"}</span><span><span class="memo-title-line">${titleLine}</span><span class="meta">${effective ? "본편 요청에 포함" : "현재 미포함"}</span></span></button><div class="row memo-heading-actions"><input type="checkbox" class="memo-toggle-input" data-change="memo-enabled" data-memo-uid="${uid}" ${memo.enabled ? "checked" : ""}><button data-action="rename-memo" data-memo-uid="${uid}">이름 변경</button><button data-action="delete-memo" data-memo-uid="${uid}" class="danger">삭제</button></div></div>${collapsed ? "" : `<div class="memo-expanded-body"><textarea data-input="memo-content" data-memo-uid="${uid}" class="memo-content-editor" placeholder="본편 모델에게 전달할 집필 지침">${escapeHtml(memo.content)}</textarea><div class="row memo-actions"><select data-change="memo-folder" data-memo-uid="${uid}" aria-label="메모 폴더">${folderOptions.replace(`value="${escapeHtml(folder.id)}"`, `value="${escapeHtml(folder.id)}" selected`)}</select></div></div>`}</div></article>`;
+            const placementPicker = `<div class="memo-placement-picker"><button type="button" class="memo-placement-button ${memo.placement === "input" ? "selected" : ""}" data-action="set-memo-placement" data-memo-uid="${uid}" data-memo-placement="input">인풋 뒤</button><button type="button" class="memo-placement-button ${memo.placement === "prompt-end" ? "selected" : ""}" data-action="set-memo-placement" data-memo-uid="${uid}" data-memo-placement="prompt-end">프롬프트 끝</button></div>`;
+            return `<article class="memo-card ${effective ? "effective" : "suppressed"} ${collapsed ? "collapsed" : "expanded"}" data-memo-card="${uid}" data-reorder-card="memo" data-reorder-id="${uid}" data-reorder-scope="${escapeHtml(folder.id)}"><div class="reorder-handle-column" draggable="true" data-reorder-kind="memo" data-reorder-id="${uid}" data-reorder-scope="${escapeHtml(folder.id)}" title="같은 폴더 안에서 메모 순서 변경" aria-label="같은 폴더 안에서 메모 순서 변경">${reorderGripIcon()}</div><div class="reorder-card-content memo-card-content"><div class="memo-card-heading"><button data-action="toggle-memo" data-memo-uid="${uid}" class="collapse-heading memo-collapse-heading" aria-expanded="${collapsed ? "false" : "true"}"><span class="collapse-icon" aria-hidden="true">${collapsed ? "▸" : "▾"}</span><span><span class="memo-title-line">${titleLine}</span><span class="meta">${effective ? "본편 요청에 포함" : "현재 미포함"}</span></span></button><div class="row memo-heading-actions">${placementPicker}<input type="checkbox" class="memo-toggle-input" data-change="memo-enabled" data-memo-uid="${uid}" ${memo.enabled ? "checked" : ""}><button data-action="rename-memo" data-memo-uid="${uid}">이름 변경</button><button data-action="delete-memo" data-memo-uid="${uid}" class="danger">삭제</button></div></div>${collapsed ? "" : `<div class="memo-expanded-body"><textarea data-input="memo-content" data-memo-uid="${uid}" class="memo-content-editor" placeholder="본편 모델에게 전달할 집필 지침">${escapeHtml(memo.content)}</textarea><div class="row memo-actions"><select data-change="memo-folder" data-memo-uid="${uid}" aria-label="메모 폴더">${folderOptions.replace(`value="${escapeHtml(folder.id)}"`, `value="${escapeHtml(folder.id)}" selected`)}</select></div></div>`}</div></article>`;
         }).join("") : !folderCollapsed ? `<div class="folder-empty">이 폴더에는 메모가 없습니다.</div>` : "";
         const folderId = escapeHtml(folder.id);
         return `<section class="memo-folder ${folder.enabled ? "enabled" : "disabled"} ${folderCollapsed ? "collapsed" : "expanded"}" data-memo-folder="${folderId}" data-reorder-card="memo-folder" data-reorder-id="${folderId}" data-reorder-scope="workspace"><div class="reorder-handle-column folder-reorder-handle" draggable="true" data-reorder-kind="memo-folder" data-reorder-id="${folderId}" data-reorder-scope="workspace" title="메모 폴더 순서 변경" aria-label="메모 폴더 순서 변경">${reorderGripIcon()}</div><div class="reorder-card-content memo-folder-content"><div class="folder-heading"><button data-action="toggle-memo-folder" data-folder-id="${folderId}" class="collapse-heading folder-collapse-heading" aria-expanded="${folderCollapsed ? "false" : "true"}"><span class="collapse-icon" aria-hidden="true">${folderCollapsed ? "▸" : "▾"}</span><span><strong>${escapeHtml(folder.name)}</strong><span class="meta">${folder.enabled ? "폴더 ON" : "폴더 OFF"} · 메모 ${memos.length}개</span></span></button><div class="row folder-actions"><input type="checkbox" class="memo-toggle-input" data-change="memo-folder-enabled" data-folder-id="${folderId}" ${folder.enabled ? "checked" : ""}><button data-action="new-memo" data-folder-id="${folderId}">메모 추가</button><button data-action="rename-memo-folder" data-folder-id="${folderId}">이름 변경</button><button data-action="delete-memo-folder" data-folder-id="${folderId}" class="danger" ${(workspace?.memoFolders.length ?? 0) <= 1 ? "disabled" : ""}>삭제</button></div></div>${folderCollapsed ? "" : `<div class="memo-list" data-reorder-list="memo" data-reorder-scope="${folderId}">${memoCards}</div>`}</div></section>`;
@@ -4277,6 +4296,16 @@ async function handleClick(event) {
         renderPreservingPanelScroll();
         return;
     }
+    if (action === "set-memo-placement" && currentWorkspace) {
+        const memo = currentWorkspace.memos.find((item) => item.uid === button.dataset.memoUid);
+        const placement = button.dataset.memoPlacement;
+        if (!memo || (placement !== "input" && placement !== "prompt-end") || memo.placement === placement)
+            return;
+        memo.placement = placement;
+        await saveCurrentWorkspace();
+        renderPreservingPanelScroll();
+        return;
+    }
     if (action === "rename-memo" && currentWorkspace) {
         const memo = currentWorkspace.memos.find((item) => item.uid === button.dataset.memoUid);
         if (!memo)
@@ -4333,7 +4362,7 @@ async function handleClick(event) {
         if (!getMemoFolder(folderId))
             return;
         const uid = uuid();
-        currentWorkspace.memos.push({ uid, folderId, displayName: "", content: "", enabled: true, createdAt: Date.now() });
+        currentWorkspace.memos.push({ uid, folderId, displayName: "", content: "", enabled: true, placement: "input", createdAt: Date.now() });
         forgetMemoUiState([folderId], [uid]);
         await saveCurrentWorkspace();
         await saveSettings();
@@ -4985,7 +5014,12 @@ function installStyles() {
         .memo-display-name-empty { color:var(--at-muted); font-weight:600; }
         .memo-sequence { flex:none; color:var(--at-muted); font-size:11px; font-weight:650; }
         .memo-sequence-only { color:var(--at-text); font-size:12px; }
-        .memo-heading-actions { flex:none; flex-wrap:wrap; justify-content:flex-end; }
+        .memo-heading-actions { flex:none; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+        .memo-placement-picker { display:flex; flex-direction:column; flex:none; overflow:hidden; border:1px solid var(--at-border); border-radius:7px; background:#101827; }
+        .memo-placement-button { min-width:86px; padding:4px 8px; border:0; border-radius:0; background:transparent; color:var(--at-muted); font-size:10px; line-height:1.2; white-space:nowrap; }
+        .memo-placement-button + .memo-placement-button { border-top:1px solid var(--at-border); }
+        .memo-placement-button.selected { background:rgba(49,130,246,.22); color:#9dc8ff; box-shadow:inset 3px 0 0 var(--at-accent); }
+        .memo-placement-button:hover { background:rgba(49,130,246,.14); color:var(--at-text); }
         .memo-collapse-heading { margin:-4px 0; }
         .memo-expanded-body { flex:1; min-height:0; display:flex; flex-direction:column; }
         .memo-content-editor { flex:1; min-height:240px; margin:14px 0 12px; padding:16px; border-color:var(--at-border); background:#111b2b; color:var(--at-muted); font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:13px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; resize:none; }
@@ -5094,7 +5128,7 @@ function installStyles() {
             .folder-heading { align-items:flex-start; flex-direction:column; }
             .folder-actions { width:100%; justify-content:flex-start; }
             .memo-card-heading { align-items:stretch; flex-direction:column; }
-            .memo-heading-actions { width:100%; justify-content:flex-end; }
+            .memo-heading-actions { width:100%; justify-content:flex-start; }
             .preset-editor > .row.between { align-items:flex-start; flex-direction:column; }
             .chat-context-message-heading { align-items:flex-start; flex-direction:column; }
             .chat-message-controls { width:100%; justify-content:space-between; }

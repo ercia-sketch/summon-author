@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 (async () => {
-const artifactPath = path.join(__dirname, "..", "summon_author_v1.1.4.js");
+const artifactPath = path.join(__dirname, "..", "summon_author_v1.1.5.js");
 const source = fs.readFileSync(artifactPath, "utf8");
 const initializeMarker = source.lastIndexOf("void initialize()");
 assert.notEqual(initializeMarker, -1, "plugin initializer marker must exist");
@@ -12,7 +12,7 @@ function loadArtifactApi(risuai = {}) {
     const previousGlobalMarkdownParser = globalThis.markdownit;
     const globalMarkdownParserSentinel = () => "기존 전역 값";
     globalThis.markdownit = globalMarkdownParserSentinel;
-    const api = new Function("Risuai", `${source.slice(0, initializeMarker)}\nreturn { renderMarkdown, normalizeContextRegexScript, normalizeWorkspace, memoBlock, orderedMemos, reorderMemoWithinFolder, renderMemoTitleLine, requestInitialPermissions, buildCharacterDescription, buildCurrentCharacterDescription, resolvePersona, buildReferenceMaterial, writerRequestMessages, renderContextDisplay, renderLoreCardsForScope, PANEL_Z_INDEX, RESIZE_LAYER_Z_INDEX, RESIZE_SHIELD_Z_INDEX, buildCbsEnvironment, processCbsText, compileRegexScripts: (scripts) => { settings.contextRegexScripts = scripts; return validateContextRegexScripts(); } };`)(risuai);
+    const api = new Function("Risuai", `${source.slice(0, initializeMarker)}\nreturn { renderMarkdown, normalizeContextRegexScript, normalizeWorkspace, memoBlock, appendMemoBlocks, orderedMemos, reorderMemoWithinFolder, renderMemoTitleLine, requestInitialPermissions, buildCharacterDescription, buildCurrentCharacterDescription, resolvePersona, buildReferenceMaterial, writerRequestMessages, renderContextDisplay, renderLoreCardsForScope, PANEL_Z_INDEX, RESIZE_LAYER_Z_INDEX, RESIZE_SHIELD_Z_INDEX, buildCbsEnvironment, processCbsText, compileRegexScripts: (scripts) => { settings.contextRegexScripts = scripts; return validateContextRegexScripts(); } };`)(risuai);
     assert.equal(globalThis.markdownit, globalMarkdownParserSentinel);
     if (previousGlobalMarkdownParser === undefined) delete globalThis.markdownit;
     else globalThis.markdownit = previousGlobalMarkdownParser;
@@ -217,17 +217,42 @@ const workspace = api.normalizeWorkspace({
     memoFolders: [{ id: "folder", name: "폴더", enabled: true, createdAt: 1 }],
     memos: [{ uid: "memo", folderId: "folder", content: "내용", enabled: true, createdAt: 1 }],
 });
+assert.equal(workspace.version, 5);
 assert.equal(workspace.memos[0].displayName, "");
+assert.equal(workspace.memos[0].placement, "input");
 workspace.memos[0].displayName = "화면 전용 이름";
 assert.equal(api.memoBlock(workspace.memos), "(Memo(1): 내용)");
 assert.match(api.renderMemoTitleLine(workspace.memos[0], 1), /화면 전용 이름.*Memo\(1\)/);
 workspace.memos[0].displayName = "";
 assert.doesNotMatch(api.renderMemoTitleLine(workspace.memos[0], 1), /이름 없음/);
 
-workspace.memos.push({ uid: "memo-2", folderId: "folder", displayName: "", content: "둘째", enabled: true, createdAt: 2 });
+workspace.memos.push({ uid: "memo-2", folderId: "folder", displayName: "", content: "둘째", enabled: true, placement: "prompt-end", createdAt: 2 });
+assert.equal(api.memoBlock([workspace.memos[0]], workspace.memos), "(Memo(1): 내용)");
+assert.equal(api.memoBlock([workspace.memos[1]], workspace.memos), "(Memo(2): 둘째)");
+
+const placed = api.appendMemoBlocks(
+    [{ role: "system", content: "기본" }, { role: "user", content: "인풋" }, { role: "system", content: "후방 프롬프트" }],
+    "(Memo(1): 인풋 메모)",
+    "(Memo(2): 끝 메모)",
+);
+assert.equal(placed.latestUserIndex, 1);
+assert.deepEqual(placed.messages, [
+    { role: "system", content: "기본" },
+    { role: "user", content: "인풋\n\n(Memo(1): 인풋 메모)" },
+    { role: "system", content: "후방 프롬프트" },
+    { role: "system", content: "(Memo(2): 끝 메모)" },
+]);
+assert.deepEqual(api.appendMemoBlocks(placed.messages, "(Memo(1): 인풋 메모)", "(Memo(2): 끝 메모)").messages, placed.messages);
+assert.deepEqual(api.appendMemoBlocks([{ role: "system", content: "기본" }], "(Memo(1): 건너뜀)", "(Memo(2): 끝 메모)").messages, [
+    { role: "system", content: "기본" },
+    { role: "system", content: "(Memo(2): 끝 메모)" },
+]);
+
 assert.equal(api.reorderMemoWithinFolder(workspace, "folder", "memo-2", "memo", false), true);
 assert.deepEqual(api.orderedMemos(workspace).map((memo) => memo.uid), ["memo-2", "memo"]);
 
+assert.match(source, /data-memo-placement="input">인풋 뒤<\/button>/);
+assert.match(source, /data-memo-placement="prompt-end">프롬프트 끝<\/button>/);
 assert.doesNotMatch(source, />\s*메모 ON<\/label>/);
 assert.doesNotMatch(source, />\s*폴더 ON<\/label>/);
 assert.doesNotMatch(source, /이번 모델 요청에만 포함됨/);

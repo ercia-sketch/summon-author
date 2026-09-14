@@ -127,6 +127,7 @@ function normalizeWriterMessage(value: any, memoFolderId: string): WriterMessage
             displayName: typeof memo.displayName === "string" ? memo.displayName : "",
             content: memo.content,
             enabled: memo.enabled !== false,
+            placement: memo.placement === "prompt-end" ? "prompt-end" : "input",
             createdAt: typeof memo.createdAt === "number" ? memo.createdAt : Date.now(),
         };
     };
@@ -177,7 +178,7 @@ function createEmptyWorkspace(): BotWorkspace {
     const roomId = uuid();
     const folderId = uuid();
     return {
-        version: 4,
+        version: 5,
         rooms: [{ id: roomId, name: "회의실 1", writerMessages: [], createdAt: Date.now() }],
         selectedRoomId: roomId,
         memoFolders: [{ id: folderId, name: "기본 메모", enabled: true, createdAt: Date.now() }],
@@ -223,11 +224,12 @@ function normalizeWorkspace(value: any): BotWorkspace {
                 displayName: typeof memo.displayName === "string" ? memo.displayName : "",
                 content: memo.content,
                 enabled: memo.enabled !== false,
+                placement: memo.placement === "prompt-end" ? "prompt-end" : "input",
                 createdAt: typeof memo.createdAt === "number" ? memo.createdAt : Date.now() + index,
             }))
         : [];
     return {
-        version: 4,
+        version: 5,
         rooms,
         selectedRoomId: rooms.some((room) => room.id === value.selectedRoomId) ? value.selectedRoomId : rooms[0].id,
         memoFolders,
@@ -283,7 +285,7 @@ async function migrateLegacyWorkspace(characterId: string, currentChatId: string
         if (Array.isArray(legacy.memos)) {
             for (const memo of legacy.memos) {
                 if (!memo || typeof memo.content !== "string") continue;
-                workspace.memos.push({ uid: uuid(), folderId, displayName: "", content: memo.content, enabled: memo.enabled !== false, createdAt: Date.now() + workspace.memos.length });
+                workspace.memos.push({ uid: uuid(), folderId, displayName: "", content: memo.content, enabled: memo.enabled !== false, placement: "input", createdAt: Date.now() + workspace.memos.length });
             }
         }
         if (legacy.loreOverrides && typeof legacy.loreOverrides === "object") {
@@ -297,7 +299,7 @@ async function migrateLegacyWorkspace(characterId: string, currentChatId: string
 }
 
 function emptyMigrationWorkspace(): BotWorkspace {
-    return { version: 4, rooms: [], selectedRoomId: "", memoFolders: [], memos: [] };
+    return { version: 5, rooms: [], selectedRoomId: "", memoFolders: [], memos: [] };
 }
 
 function mergeWorkspace(target: BotWorkspace, source: BotWorkspace): void {
@@ -409,7 +411,7 @@ async function loadWorkspace(): Promise<BotWorkspace> {
         workspaceLoadPromise = (async () => {
             const stored = await readStoredJson<any>(GLOBAL_WORKSPACE_KEY, null);
             const workspace = stored ? normalizeWorkspace(stored) : await migrateGlobalWorkspace();
-            if (!stored || stored.version !== 4) await writeStoredJson(GLOBAL_WORKSPACE_KEY, workspace);
+            if (!stored || stored.version !== 5) await writeStoredJson(GLOBAL_WORKSPACE_KEY, workspace);
             return workspace;
         })();
     }

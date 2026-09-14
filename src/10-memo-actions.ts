@@ -35,6 +35,7 @@ function memoEquals(left: Memo | undefined | null, right: Memo | undefined | nul
         && left.displayName === right.displayName
         && left.content === right.content
         && left.enabled === right.enabled
+        && left.placement === right.placement
         && left.createdAt === right.createdAt;
 }
 
@@ -84,7 +85,7 @@ async function applyMemoActions(messageId: string): Promise<void> {
         }
         for (const action of message.pendingActions) {
             if (action.operation === "create") {
-                nextMemos.push({ uid: uuid(), folderId: writerFolderId, displayName: "", content: action.content!, enabled: true, createdAt: Date.now() + nextMemos.length });
+                nextMemos.push({ uid: uuid(), folderId: writerFolderId, displayName: "", content: action.content!, enabled: true, placement: "input", createdAt: Date.now() + nextMemos.length });
                 continue;
             }
             const targetUid = action.id ? numberMap[String(action.id)] : undefined;
