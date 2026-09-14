@@ -187,7 +187,8 @@ function installStyles(): void {
         .fm-nav { display:flex; align-items:center; gap:4px; flex:none; }
         .fm-arrow { padding:2px 8px; font-size:16px; line-height:1; border-radius:6px; cursor:pointer; }
         .fm-counter { font-size:12px; font-weight:700; color:var(--at-muted); white-space:nowrap; min-width:32px; text-align:center; }
-        .empty-context { color:#e8a317; font-style:italic; }
+        .empty-context { color:var(--at-muted); font-style:normal; }
+        .context-empty-block { padding:24px; text-align:center; }
         .reason { color:var(--at-muted); font-size:13px; margin:10px 0; }
         .chat-context-list { display:grid; gap:10px; padding:16px; background:#0d1014; }
         .chat-context-message { overflow:hidden; border:1px solid var(--at-border); border-radius:10px; background:var(--at-panel); }

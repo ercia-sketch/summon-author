@@ -10,6 +10,17 @@ function cbsVariable(environment: CbsEnvironment, key: string): string {
     return environment.variables[key] ?? "null";
 }
 
+function cbsLocalGlobalVariable(environment: CbsEnvironment, key: string): { available: boolean; value: string } {
+    if (!Object.prototype.hasOwnProperty.call(environment.localGlobalVariables, key)) {
+        return { available: false, value: "" };
+    }
+    return { available: true, value: environment.localGlobalVariables[key] };
+}
+
+function cbsLocalToggle(environment: CbsEnvironment, key: string): { available: boolean; value: string } {
+    return cbsLocalGlobalVariable(environment, `toggle_${key}`);
+}
+
 function isEscapedAt(text: string, index: number): boolean {
     let slashes = 0;
     for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor--) slashes++;
@@ -64,6 +75,11 @@ function evaluateCbsInline(inner: string, raw: string, environment: CbsEnvironme
     const bool = (value: boolean) => value ? "1" : "0";
     switch (command) {
         case "getvar": return { text: cbsVariable(environment, args[0] ?? "") };
+        case "getglobalvar": {
+            const variable = cbsLocalGlobalVariable(environment, args[0] ?? "");
+            if (!variable.available) return { text: raw, warning: "{{getglobalvar}}" };
+            return { text: variable.value };
+        }
         case "char":
         case "bot": return { text: environment.charName };
         case "user": return { text: environment.userName };
@@ -151,34 +167,45 @@ function resolveCbsHeaderInlines(value: string, environment: CbsEnvironment): Cb
     return { text: output, warnings: uniqueWarnings(warnings) };
 }
 
-function evaluateCbsWhen(header: string, environment: CbsEnvironment): { supported: boolean; active: boolean; keepWhitespace: boolean; warning?: string } {
+type CbsWhitespaceMode = "normal" | "keep" | "legacy";
+
+function normalizeCbsBlockWhitespace(text: string, mode: CbsWhitespaceMode): string {
+    if (mode === "keep") return text;
+    if (mode === "legacy") return text.trim().split("\n").map((line) => line.trimStart()).join("\n").trim();
+    const lines = text.split("\n");
+    while (lines.length > 0 && lines[0].trim() === "") lines.shift();
+    while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
+    return lines.join("\n");
+}
+
+function evaluateCbsWhen(header: string, environment: CbsEnvironment): { supported: boolean; active: boolean; whitespaceMode: CbsWhitespaceMode; warning?: string } {
     const trimmed = header.trim();
     if (trimmed.startsWith("#if_pure ")) {
         const state = trimmed.slice(9).split(" ", 1)[0];
-        return { supported: true, active: cbsTruthy(state), keepWhitespace: true };
+        return { supported: true, active: cbsTruthy(state), whitespaceMode: "keep" };
     }
-    if (trimmed === "#if_pure") return { supported: false, active: false, keepWhitespace: true, warning: "잘못된 {{#if_pure}} 조건" };
+    if (trimmed === "#if_pure") return { supported: false, active: false, whitespaceMode: "keep", warning: "잘못된 {{#if_pure}} 조건" };
     if (trimmed.startsWith("#if ")) {
         const state = trimmed.slice(4).split(" ", 1)[0];
-        return { supported: true, active: cbsTruthy(state), keepWhitespace: false };
+        return { supported: true, active: cbsTruthy(state), whitespaceMode: "legacy" };
     }
-    if (trimmed === "#if") return { supported: false, active: false, keepWhitespace: false, warning: "잘못된 {{#if}} 조건" };
+    if (trimmed === "#if") return { supported: false, active: false, whitespaceMode: "legacy", warning: "잘못된 {{#if}} 조건" };
     if (trimmed.startsWith("#when ")) {
         const state = trimmed.slice(6).split(" ", 1)[0];
-        return { supported: true, active: cbsTruthy(state), keepWhitespace: false };
+        return { supported: true, active: cbsTruthy(state), whitespaceMode: "normal" };
     }
-    if (!trimmed.startsWith("#when::")) return { supported: false, active: false, keepWhitespace: false, warning: cbsSyntaxName(trimmed) };
+    if (!trimmed.startsWith("#when::")) return { supported: false, active: false, whitespaceMode: "normal", warning: cbsSyntaxName(trimmed) };
 
     const statement = trimmed.slice(7).split("::");
-    let keepWhitespace = false;
+    let whitespaceMode: CbsWhitespaceMode = "normal";
     while (statement.length > 1) {
         const condition = statement.pop() ?? "";
-        const operator = (statement.pop() ?? "").toLocaleLowerCase();
+        const operator = statement.pop() ?? "";
         const pushBoolean = (value: boolean) => statement.push(value ? "1" : "0");
         switch (operator) {
             case "not": pushBoolean(!cbsTruthy(condition)); break;
-            case "keep": keepWhitespace = true; statement.push(condition); break;
-            case "legacy": statement.push(condition); break;
+            case "keep": whitespaceMode = "keep"; statement.push(condition); break;
+            case "legacy": whitespaceMode = "legacy"; statement.push(condition); break;
             case "and": pushBoolean(cbsTruthy(statement.pop() ?? "") && cbsTruthy(condition)); break;
             case "or": pushBoolean(cbsTruthy(statement.pop() ?? "") || cbsTruthy(condition)); break;
             case "is": pushBoolean((statement.pop() ?? "") === condition); break;
@@ -186,18 +213,29 @@ function evaluateCbsWhen(header: string, environment: CbsEnvironment): { support
             case "var": pushBoolean(cbsTruthy(cbsVariable(environment, condition))); break;
             case "vis": pushBoolean(cbsVariable(environment, statement.pop() ?? "") === condition); break;
             case "visnot": pushBoolean(cbsVariable(environment, statement.pop() ?? "") !== condition); break;
-            case ">": pushBoolean(Number(statement.pop()) > Number(condition)); break;
-            case "<": pushBoolean(Number(statement.pop()) < Number(condition)); break;
-            case ">=": pushBoolean(Number(statement.pop()) >= Number(condition)); break;
-            case "<=": pushBoolean(Number(statement.pop()) <= Number(condition)); break;
-            case "toggle":
+            case ">": pushBoolean(Number.parseFloat(statement.pop() ?? "") > Number.parseFloat(condition)); break;
+            case "<": pushBoolean(Number.parseFloat(statement.pop() ?? "") < Number.parseFloat(condition)); break;
+            case ">=": pushBoolean(Number.parseFloat(statement.pop() ?? "") >= Number.parseFloat(condition)); break;
+            case "<=": pushBoolean(Number.parseFloat(statement.pop() ?? "") <= Number.parseFloat(condition)); break;
+            case "toggle": {
+                const toggle = cbsLocalToggle(environment, condition);
+                if (!toggle.available) return { supported: false, active: false, whitespaceMode, warning: "{{#when:toggle}}" };
+                pushBoolean(cbsTruthy(toggle.value));
+                break;
+            }
             case "tis":
-            case "tisnot": return { supported: false, active: false, keepWhitespace, warning: `{{#when:${operator}}}` };
-            default: return { supported: false, active: false, keepWhitespace, warning: `지원하지 않는 #when 연산자 “${operator || "없음"}”` };
+            case "tisnot": {
+                const toggle = cbsLocalToggle(environment, statement.pop() ?? "");
+                if (!toggle.available) return { supported: false, active: false, whitespaceMode, warning: `{{#when:${operator}}}` };
+                pushBoolean(operator === "tis" ? toggle.value === condition : toggle.value !== condition);
+                break;
+            }
+            // RisuAI treats an unknown operator as the truthiness of its right-hand value.
+            default: pushBoolean(cbsTruthy(condition)); break;
         }
     }
-    if (statement.length !== 1) return { supported: false, active: false, keepWhitespace, warning: "잘못된 {{#when}} 조건" };
-    return { supported: true, active: cbsTruthy(statement[0]), keepWhitespace };
+    if (statement.length !== 1) return { supported: false, active: false, whitespaceMode, warning: "잘못된 {{#when}} 조건" };
+    return { supported: true, active: cbsTruthy(statement[0]), whitespaceMode };
 }
 
 interface CbsSequenceResult extends CbsProcessResult {
@@ -205,7 +243,7 @@ interface CbsSequenceResult extends CbsProcessResult {
     stop: "else" | "close" | null;
 }
 
-function parseCbsSequence(text: string, from: number, environment: CbsEnvironment, stopOnControl: boolean, omitUnsupported = false): CbsSequenceResult {
+function parseCbsSequence(text: string, from: number, environment: CbsEnvironment, stopOnControl: boolean, omitUnsupported = false, recognizeElse = true): CbsSequenceResult {
     let output = "";
     const warnings: string[] = [];
     let position = from;
@@ -225,6 +263,11 @@ function parseCbsSequence(text: string, from: number, environment: CbsEnvironmen
         const header = resolveCbsHeaderInlines(token.inner, environment);
         warnings.push(...header.warnings);
         const trimmed = header.text.trim();
+        if (trimmed === ":else" && !recognizeElse) {
+            output += token.raw;
+            position = token.end;
+            continue;
+        }
         if (trimmed === ":else" || trimmed.startsWith("/")) {
             if (stopOnControl) return {
                 text: output,
@@ -240,13 +283,14 @@ function parseCbsSequence(text: string, from: number, environment: CbsEnvironmen
         if (trimmed.startsWith("#")) {
             const condition = evaluateCbsWhen(trimmed, environment);
             if (condition.warning) warnings.push(condition.warning);
-            const truthyBranch = parseCbsSequence(text, token.end, environment, true, omitUnsupported);
+            const recognizeBranchElse = condition.whitespaceMode !== "legacy";
+            const truthyBranch = parseCbsSequence(text, token.end, environment, true, omitUnsupported, recognizeBranchElse);
             warnings.push(...truthyBranch.warnings);
             let falsyBranch: CbsSequenceResult | null = null;
             let blockEnd = truthyBranch.position;
             let closed = truthyBranch.stop === "close";
             if (truthyBranch.stop === "else") {
-                falsyBranch = parseCbsSequence(text, truthyBranch.position, environment, true, omitUnsupported);
+                falsyBranch = parseCbsSequence(text, truthyBranch.position, environment, true, omitUnsupported, recognizeBranchElse);
                 warnings.push(...falsyBranch.warnings);
                 blockEnd = falsyBranch.position;
                 closed = falsyBranch.stop === "close";
@@ -261,7 +305,7 @@ function parseCbsSequence(text: string, from: number, environment: CbsEnvironmen
                 if (!omitUnsupported) output += text.slice(start, blockEnd);
             } else {
                 const selected = condition.active ? truthyBranch.text : falsyBranch?.text ?? "";
-                output += condition.keepWhitespace ? selected : selected.trim();
+                output += normalizeCbsBlockWhitespace(selected, condition.whitespaceMode);
             }
             position = blockEnd;
             continue;
@@ -293,7 +337,7 @@ interface CbsDisplaySequenceResult extends CbsDisplayResult {
     controlRaw: string;
 }
 
-function parseCbsDisplaySequence(text: string, from: number, environment: CbsEnvironment, stopOnControl: boolean, forceFalse = false): CbsDisplaySequenceResult {
+function parseCbsDisplaySequence(text: string, from: number, environment: CbsEnvironment, stopOnControl: boolean, forceFalse = false, recognizeElse = true): CbsDisplaySequenceResult {
     let html = "";
     const warnings: string[] = [];
     let position = from;
@@ -313,6 +357,11 @@ function parseCbsDisplaySequence(text: string, from: number, environment: CbsEnv
         const header = resolveCbsHeaderInlines(token.inner, environment);
         warnings.push(...header.warnings);
         const trimmed = header.text.trim();
+        if (trimmed === ":else" && !recognizeElse) {
+            html += escapeHtml(token.raw);
+            position = token.end;
+            continue;
+        }
         if (trimmed === ":else" || trimmed.startsWith("/")) {
             if (stopOnControl) return {
                 html,
@@ -330,13 +379,14 @@ function parseCbsDisplaySequence(text: string, from: number, environment: CbsEnv
             const condition = evaluateCbsWhen(trimmed, environment);
             if (condition.warning) warnings.push(condition.warning);
             const unsupported = !condition.supported || header.warnings.length > 0;
-            const truthyBranch = parseCbsDisplaySequence(text, token.end, environment, true, forceFalse || unsupported || !condition.active);
+            const recognizeBranchElse = condition.whitespaceMode !== "legacy";
+            const truthyBranch = parseCbsDisplaySequence(text, token.end, environment, true, forceFalse || unsupported || !condition.active, recognizeBranchElse);
             warnings.push(...truthyBranch.warnings);
             let falsyBranch: CbsDisplaySequenceResult | null = null;
             let blockEnd = truthyBranch.position;
             let closed = truthyBranch.stop === "close";
             if (truthyBranch.stop === "else") {
-                falsyBranch = parseCbsDisplaySequence(text, truthyBranch.position, environment, true, forceFalse || unsupported || condition.active);
+                falsyBranch = parseCbsDisplaySequence(text, truthyBranch.position, environment, true, forceFalse || unsupported || condition.active, recognizeBranchElse);
                 warnings.push(...falsyBranch.warnings);
                 blockEnd = falsyBranch.position;
                 closed = falsyBranch.stop === "close";

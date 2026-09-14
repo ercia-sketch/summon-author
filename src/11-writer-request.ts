@@ -145,12 +145,13 @@ function writerRequestMessages(context: WriterContext, room: WriterRoom, project
     const projected = projectedDraft.trim()
         ? [...history, { role: "user", content: applyWriterMarkdownCleanup(projectedDraft.trim()) }]
         : history;
-    return [
+    const systemMessages = [
         { role: "system", content: base.content },
         { role: "system", content: additional.content },
-        { role: "system", content: buildReferenceMaterial(context) },
-        ...projected,
     ];
+    const referenceMaterial = buildReferenceMaterial(context);
+    if (referenceMaterial) systemMessages.push({ role: "system", content: referenceMaterial });
+    return [...systemMessages, ...projected];
 }
 
 interface WriterTokenSummary {

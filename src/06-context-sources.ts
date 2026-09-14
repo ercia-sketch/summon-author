@@ -17,6 +17,19 @@ function selectedPersona(database: any, chat: any): any | null {
     return Number.isInteger(database?.selectedPersona) ? personas[database.selectedPersona] ?? null : null;
 }
 
+function parseLocalGlobalVariables(globalVariables: unknown): Record<string, string> {
+    const variables: Record<string, string> = {};
+    if (!globalVariables || typeof globalVariables !== "object") return variables;
+    for (const [storedKey, stored] of Object.entries(globalVariables)) {
+        if (stored === undefined || stored === null) continue;
+        const storedValue = String(stored);
+        // RisuAI falls back to the unavailable global value for empty and literal null local values.
+        if (!storedValue || storedValue === "null") continue;
+        variables[storedKey] = storedValue;
+    }
+    return variables;
+}
+
 function buildCbsEnvironment(identity: SessionIdentity, database: any): CbsEnvironment {
     const variables = parseDefaultVariables(identity.character?.defaultVariables);
     const scriptState = identity.chat?.scriptstate;
@@ -29,6 +42,7 @@ function buildCbsEnvironment(identity: SessionIdentity, database: any): CbsEnvir
     const persona = selectedPersona(database, identity.chat);
     return {
         variables,
+        localGlobalVariables: parseLocalGlobalVariables(identity.chat?.GLGlobalVariables),
         charName: String(identity.character?.name || "Character"),
         userName: String(persona?.name || "User"),
     };
@@ -50,7 +64,7 @@ function buildCharacterDescription(character: any): string {
     const lines: string[] = [];
     appendField(lines, "Name", character.name);
     appendField(lines, "Description", character.desc);
-    return lines.join("\n\n") || "No character name or description was available.";
+    return lines.join("\n\n");
 }
 
 function firstText(...values: unknown[]): string {
@@ -94,7 +108,12 @@ function buildCurrentCharacterDescription(character: any, database: any): string
     if (character?.type !== "group" || !Array.isArray(character.characters)) return primary;
     const members = groupMembers(character, database);
     if (members.length === 0) return primary;
-    return `${primary}\n\n${members.map((member: any, index: number) => `[Group Member ${index + 1}]\n${buildCharacterDescription(member)}`).join("\n\n")}`;
+    const blocks = primary ? [primary] : [];
+    for (const [index, member] of members.entries()) {
+        const description = buildCharacterDescription(member);
+        if (description) blocks.push(`[Group Member ${index + 1}]\n${description}`);
+    }
+    return blocks.join("\n\n");
 }
 
 function buildCurrentCharacterOther(character: any, database: any): string {
@@ -110,11 +129,11 @@ function buildCurrentCharacterOther(character: any, database: any): string {
 
 function resolvePersona(database: any, chat: any): string {
     const persona = selectedPersona(database, chat);
-    if (!persona) return "No persona description was available or database permission was not granted.";
+    if (!persona) return "";
     const parts: string[] = [];
     appendField(parts, "Persona Name", persona.name);
     appendField(parts, "Persona Description", persona.personaPrompt);
-    return parts.join("\n\n") || "The selected persona has no description.";
+    return parts.join("\n\n");
 }
 
 function collectLongTermMemories(chat: any): string[] {
